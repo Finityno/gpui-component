@@ -11,9 +11,10 @@ use gpui::{
     App, Axis, BorderStyle, Bounds, ContentMask, Corner, CursorStyle, Edges, Element, ElementId,
     GlobalElementId, Hitbox, HitboxBehavior, Hsla, InspectorElementId, IntoElement, IsZero,
     LayoutId, ListState, MouseDownEvent, MouseMoveEvent, MouseUpEvent, PaintQuad, Pixels, Point,
-    Position, ScrollHandle, ScrollWheelEvent, Size, Style, Timer, UniformListScrollHandle, Window,
+    Position, ScrollHandle, ScrollWheelEvent, Size, Style, UniformListScrollHandle, Window,
     fill, point, px, relative, size,
 };
+use smol::Timer;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
