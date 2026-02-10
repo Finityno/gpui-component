@@ -61,6 +61,9 @@ pub(super) struct TextWrapper {
     pub(super) longest_row: LongestRow,
     /// The lines by split \n
     pub(super) lines: Vec<LineItem>,
+    /// Prefix sum of wrapped line counts for O(1) lookup.
+    /// `cumulative_wrapped_lines[i]` = total wrapped lines in `lines[0..i]`.
+    cumulative_wrapped_lines: Vec<usize>,
 
     _initialized: bool,
 }
@@ -76,6 +79,7 @@ impl TextWrapper {
             soft_lines: 0,
             longest_row: LongestRow::default(),
             lines: Vec::new(),
+            cumulative_wrapped_lines: Vec::new(),
             _initialized: false,
         }
     }
@@ -89,6 +93,13 @@ impl TextWrapper {
     #[inline]
     pub(super) fn len(&self) -> usize {
         self.soft_lines
+    }
+
+    /// Get the cumulative wrapped line count before the given row.
+    /// Returns 0 if row is out of bounds.
+    #[inline]
+    pub(super) fn cumulative_at(&self, row: usize) -> usize {
+        self.cumulative_wrapped_lines.get(row).copied().unwrap_or(0)
     }
 
     /// Get the line item by row index.
@@ -231,7 +242,17 @@ impl TextWrapper {
         }
 
         self.text = changed_text.clone();
-        self.soft_lines = self.lines.iter().map(|l| l.lines_len()).sum();
+
+        // Rebuild prefix sum for O(1) cumulative line count lookups
+        self.cumulative_wrapped_lines.clear();
+        self.cumulative_wrapped_lines.reserve(self.lines.len());
+        let mut cumulative = 0;
+        for line in &self.lines {
+            self.cumulative_wrapped_lines.push(cumulative);
+            cumulative += line.lines_len();
+        }
+        self.soft_lines = cumulative;
+
         self.longest_row = LongestRow {
             row: longest_row_ix,
             len: longest_row_len,
@@ -253,12 +274,7 @@ impl TextWrapper {
         let start = self.text.line_start_offset(row);
         let line = &self.lines[row];
 
-        let mut wrapped_row = self
-            .lines
-            .iter()
-            .take(row)
-            .map(|l| l.lines_len())
-            .sum::<usize>();
+        let wrapped_row = self.cumulative_at(row);
 
         let local_offset = offset.saturating_sub(start);
         for (ix, range) in line.wrapped_lines.iter().enumerate() {
@@ -281,23 +297,30 @@ impl TextWrapper {
     ///
     /// Panics if the `point.row` is out of bounds.
     pub(crate) fn display_point_to_offset(&self, point: DisplayPoint) -> usize {
-        let mut wrapped_row = 0;
-        for (row, line) in self.lines.iter().enumerate() {
-            if wrapped_row + line.lines_len() > point.row {
-                let line_start = self.text.line_start_offset(row);
-                let local_row = point.row.saturating_sub(wrapped_row);
-                if let Some(range) = line.wrapped_lines.get(local_row) {
-                    return line_start + (range.start + point.column).min(range.end);
-                } else {
-                    // If not found, return the end of the line.
-                    return line_start + line.len();
-                }
-            }
-
-            wrapped_row += line.lines_len();
+        if self.cumulative_wrapped_lines.is_empty() {
+            return self.text.len();
         }
 
-        return self.text.len();
+        // Binary search for the logical line containing this wrapped row
+        let row = match self.cumulative_wrapped_lines.binary_search(&point.row) {
+            Ok(ix) => ix,
+            Err(ix) => ix.saturating_sub(1),
+        };
+
+        if row >= self.lines.len() {
+            return self.text.len();
+        }
+
+        let line = &self.lines[row];
+        let wrapped_row = self.cumulative_at(row);
+        let local_row = point.row.saturating_sub(wrapped_row);
+
+        let line_start = self.text.line_start_offset(row);
+        if let Some(range) = line.wrapped_lines.get(local_row) {
+            line_start + (range.start + point.column).min(range.end)
+        } else {
+            line_start + line.len()
+        }
     }
 
     pub(crate) fn display_point_to_point(&self, point: DisplayPoint) -> tree_sitter::Point {

@@ -1,5 +1,5 @@
 use gpui::{
-    Action, App, AppContext, Context,DismissEvent, Entity, EventEmitter, FocusHandle, Focusable,
+    Action, App, AppContext, Context, DismissEvent, Entity, EventEmitter, FocusHandle, Focusable,
     InteractiveElement, IntoElement, KeyBinding, MouseButton, ParentElement as _, Render,
     Styled as _, Window, actions, div, px,
 };

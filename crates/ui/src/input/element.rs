@@ -231,6 +231,12 @@ impl TextElement {
                 }
             }
 
+            // Apply deferred scroll offset (from scroll_to) BEFORE computing cursor_bounds
+            // so the cursor is painted at the correct position on the same frame as the scroll
+            if let Some(deferred_scroll_offset) = state.deferred_scroll_offset {
+                scroll_offset = deferred_scroll_offset;
+            }
+
             // cursor bounds
             let cursor_height = match state.size {
                 crate::Size::Large => 1.,
@@ -247,6 +253,8 @@ impl TextElement {
             ));
         }
 
+        // Also apply deferred scroll offset outside the cursor block as fallback
+        // (handles cases where cursor_pos/cursor_start/cursor_end are None)
         if let Some(deferred_scroll_offset) = state.deferred_scroll_offset {
             scroll_offset = deferred_scroll_offset;
         }

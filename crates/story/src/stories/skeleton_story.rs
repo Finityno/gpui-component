@@ -1,6 +1,6 @@
 use gpui::{
-    px, App, AppContext, Context, Entity, Focusable, IntoElement, ParentElement, Render, Styled,
-    Window,
+    App, AppContext, Context, Entity, Focusable, IntoElement, ParentElement, Render, Styled,
+    Window, px,
 };
 use gpui_component::{skeleton::Skeleton, v_flex};
 

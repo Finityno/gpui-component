@@ -94,12 +94,16 @@ actions!(
 #[derive(Clone)]
 pub enum InputEvent {
     Change,
-    PressEnter { secondary: bool },
+    PressEnter {
+        secondary: bool,
+    },
     Focus,
     Blur,
     /// Emitted when images are pasted from clipboard.
     /// Consumer should handle storing/displaying the images.
-    PasteImages { images: Vec<gpui::Image> },
+    PasteImages {
+        images: Vec<gpui::Image>,
+    },
 }
 
 pub(super) const CONTEXT: &str = "Input";
@@ -1379,9 +1383,21 @@ impl InputState {
         cx: &mut Context<Self>,
     ) {
         let Some(last_layout) = self.last_layout.as_ref() else {
+            // Even without layout, set a basic deferred scroll so the first
+            // render after a paste scrolls to approximately the right position
+            let text_point = self.text.offset_to_point(offset);
+            let estimated_line_height = px(20.);
+            let row_y = text_point.row as f32 * estimated_line_height;
+            self.deferred_scroll_offset = Some(point(px(0.), -row_y));
+            cx.notify();
             return;
         };
         let Some(bounds) = self.last_bounds.as_ref() else {
+            let text_point = self.text.offset_to_point(offset);
+            let line_height = last_layout.line_height;
+            let row_y = text_point.row as f32 * line_height;
+            self.deferred_scroll_offset = Some(point(px(0.), -row_y));
+            cx.notify();
             return;
         };
 
@@ -1393,14 +1409,8 @@ impl InputState {
 
         let row = point.row;
 
-        let mut row_offset_y = px(0.);
-        for (ix, wrap_line) in self.text_wrapper.lines.iter().enumerate() {
-            if ix == row {
-                break;
-            }
-
-            row_offset_y += wrap_line.height(line_height);
-        }
+        let wrapped_rows_before = self.text_wrapper.cumulative_at(row);
+        let mut row_offset_y = wrapped_rows_before as f32 * line_height;
 
         // Apart from left alignment, just leave enough space for the cursor size on the right side.
         let safety_margin = if last_layout.text_align == TextAlign::Left {
