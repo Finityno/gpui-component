@@ -644,9 +644,22 @@ impl InputState {
             self.lsp.reset();
         }
 
+        // Invalidate stale layout state so the next render starts fresh.
+        // Without this, render_editor may draw a scrollbar using dimensions
+        // from the previous (now-replaced) content, producing a one-frame
+        // artifact (e.g. a half-visible scrollbar after clearing).
+        self.last_layout = None;
+        self.last_bounds = None;
+        self.scroll_size = gpui::size(px(0.), px(0.));
+
         // Move scroll to top and discard any pending deferred scroll.
         self.scroll_handle.set_offset(point(px(0.), px(0.)));
         self.deferred_scroll_offset = None;
+
+        // Re-pause the blink cursor so its 300ms visibility timer restarts
+        // from *now* rather than from the start of replace_text. Without this,
+        // the cursor blinks out ~300ms after the text change becomes visible.
+        self.pause_blink_cursor(cx);
 
         cx.notify();
     }
@@ -1760,12 +1773,19 @@ impl InputState {
         offset
     }
 
-    /// Returns the true to let InputElement to render cursor, when Input is focused and current BlinkCursor is visible.
+    /// Returns true to let InputElement render the cursor when the Input is
+    /// focused and the current BlinkCursor is visible.
+    ///
+    /// Note: we intentionally do NOT gate on `window.is_window_active()` here.
+    /// Window activation already controls the blink cursor via
+    /// `observe_window_activation` (start on activate, stop on deactivate).
+    /// Adding an extra `is_window_active` check causes the cursor to
+    /// disappear during transient window-inactive states on Windows (e.g.
+    /// keyboard shortcut processing), which leads to a visible flicker.
     pub(crate) fn show_cursor(&self, window: &Window, cx: &App) -> bool {
         (self.focus_handle.is_focused(window) || self.is_context_menu_open(cx))
             && !self.disabled
             && self.blink_cursor.read(cx).visible()
-            && window.is_window_active()
     }
 
     fn on_focus(&mut self, _: &mut Window, cx: &mut Context<Self>) {
