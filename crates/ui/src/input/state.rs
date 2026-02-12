@@ -1827,6 +1827,18 @@ impl InputState {
         self.pause_blink_cursor(cx);
     }
 
+    fn reset_scroll_if_text_empty(&mut self) {
+        if self.text.len() != 0 {
+            return;
+        }
+
+        // Deleting all content can leave an old scroll offset for one frame,
+        // which paints placeholder/cursor outside the viewport.
+        let zero_offset = point(px(0.), px(0.));
+        self.scroll_handle.set_offset(zero_offset);
+        self.deferred_scroll_offset = Some(zero_offset);
+    }
+
     pub(super) fn on_drag_move(
         &mut self,
         event: &MouseMoveEvent,
@@ -2123,6 +2135,8 @@ impl EntityInputHandler for InputState {
             }
         }
 
+        self.reset_scroll_if_text_empty();
+
         if !self.silent_replace_text {
             self.handle_completion_trigger(&range, &new_text, window, cx);
         }
@@ -2187,6 +2201,7 @@ impl EntityInputHandler for InputState {
                 .into();
         }
         self.mode.update_auto_grow(&self.text_wrapper);
+        self.reset_scroll_if_text_empty();
         self.history.start_grouping();
         self.push_history(&old_text, &range, new_text);
         cx.notify();
