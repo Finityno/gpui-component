@@ -644,8 +644,9 @@ impl InputState {
             self.lsp.reset();
         }
 
-        // Move scroll to top
+        // Move scroll to top and discard any pending deferred scroll.
         self.scroll_handle.set_offset(point(px(0.), px(0.)));
+        self.deferred_scroll_offset = None;
 
         cx.notify();
     }
@@ -1888,20 +1889,27 @@ impl InputState {
         let wrap_width_changed = self.input_bounds.size.width != new_bounds.size.width;
         self.input_bounds = new_bounds;
 
-        // Update text_wrapper wrap_width if changed.
-        if let Some(last_layout) = self.last_layout.as_ref() {
-            if wrap_width_changed {
-                let wrap_width = if !self.soft_wrap {
-                    // None to disable wrapping (will use Pixels::MAX)
-                    None
-                } else {
-                    last_layout.wrap_width
-                };
+        // Keep auto-grow rows synchronized with the prepared text wrapper.
+        // This avoids stale one-line heights on the first large paste.
+        let Some(last_layout) = self.last_layout.as_ref() else {
+            return;
+        };
 
-                self.text_wrapper.set_wrap_width(wrap_width, cx);
-                self.mode.update_auto_grow(&self.text_wrapper);
-                cx.notify();
-            }
+        if wrap_width_changed {
+            let wrap_width = if !self.soft_wrap {
+                // None to disable wrapping (will use Pixels::MAX)
+                None
+            } else {
+                last_layout.wrap_width
+            };
+
+            self.text_wrapper.set_wrap_width(wrap_width, cx);
+        }
+
+        let previous_rows = self.mode.rows();
+        self.mode.update_auto_grow(&self.text_wrapper);
+        if wrap_width_changed || self.mode.rows() != previous_rows {
+            cx.notify();
         }
     }
 
@@ -2073,7 +2081,28 @@ impl EntityInputHandler for InputState {
         self.ime_marked_range.take();
         self.update_preferred_column();
         self.update_search(cx);
+        let previous_rows = self.mode.rows();
         self.mode.update_auto_grow(&self.text_wrapper);
+
+        // When auto-grow changes the row count, the element height will change on
+        // the next frame.  Eagerly update `last_bounds` height, `input_bounds`
+        // height, and `scroll_size` to match the new row count so that `scroll_to`
+        // (called right after paste) computes a correct offset for the future
+        // layout instead of using the stale pre-change height.
+        if self.mode.is_auto_grow() && self.mode.rows() != previous_rows {
+            if let Some(ref last_layout) = self.last_layout {
+                let line_height = last_layout.line_height;
+                let new_rows = self.mode.max_rows().min(self.mode.rows());
+                let new_height = new_rows as f32 * line_height;
+                if let Some(ref mut bounds) = self.last_bounds {
+                    bounds.size.height = new_height;
+                }
+                self.input_bounds.size.height = new_height;
+                let content_height = self.text_wrapper.len() as f32 * line_height;
+                self.scroll_size.height = content_height.max(new_height);
+            }
+        }
+
         if !self.silent_replace_text {
             self.handle_completion_trigger(&range, &new_text, window, cx);
         }
