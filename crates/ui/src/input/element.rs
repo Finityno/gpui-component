@@ -10,7 +10,7 @@ use ropey::Rope;
 use smallvec::SmallVec;
 
 use crate::{
-    ActiveTheme as _, Colorize, PixelsExt, Root,
+    ActiveTheme as _, Colorize, Root,
     input::{RopeExt as _, blink_cursor::CURSOR_WIDTH, text_wrapper::LineLayout},
 };
 
@@ -384,8 +384,6 @@ impl TextElement {
                 }
             }
         }
-
-        // print_points_as_svg_path(&line_corners, &points);
 
         let path_origin = bounds.origin + point(line_number_width, px(0.));
         let first_p = *points.get(0).unwrap();
@@ -856,38 +854,6 @@ impl IntoElement for TextElement {
 
     fn into_element(self) -> Self::Element {
         self
-    }
-}
-
-/// A debug function to print points as SVG path.
-#[allow(unused)]
-fn print_points_as_svg_path(
-    line_corners: &Vec<Corners<Point<Pixels>>>,
-    points: &Vec<Point<Pixels>>,
-) {
-    for corners in line_corners {
-        println!(
-            "tl: ({}, {}), tr: ({}, {}), bl: ({}, {}), br: ({}, {})",
-            corners.top_left.x.as_f32() as i32,
-            corners.top_left.y.as_f32() as i32,
-            corners.top_right.x.as_f32() as i32,
-            corners.top_right.y.as_f32() as i32,
-            corners.bottom_left.x.as_f32() as i32,
-            corners.bottom_left.y.as_f32() as i32,
-            corners.bottom_right.x.as_f32() as i32,
-            corners.bottom_right.y.as_f32() as i32,
-        );
-    }
-
-    if points.len() > 0 {
-        println!(
-            "M{},{}",
-            points[0].x.as_f32() as i32,
-            points[0].y.as_f32() as i32
-        );
-        for p in points.iter().skip(1) {
-            println!("L{},{}", p.x.as_f32() as i32, p.y.as_f32() as i32);
-        }
     }
 }
 
