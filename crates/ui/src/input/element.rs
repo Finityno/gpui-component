@@ -194,29 +194,18 @@ impl TextElement {
                     scroll_offset.x
                 };
 
-                if state.mode.is_auto_grow() {
-                    // Auto-grow inputs (chat composer) should snap the cursor back into view in one
-                    // frame; line-by-line adjustment causes visible lag when content shrinks quickly.
-                    let viewport_top = top_bottom_margin;
-                    let viewport_bottom =
-                        (bounds.size.height - top_bottom_margin - line_height).max(viewport_top);
-                    let cursor_top = scroll_offset.y + cursor_pos.y;
-
-                    if cursor_top > viewport_bottom {
-                        scroll_offset.y = viewport_bottom - cursor_pos.y;
-                    } else if cursor_top < viewport_top {
-                        scroll_offset.y = viewport_top - cursor_pos.y;
-                    }
-                } else {
-                    // For non auto-grow inputs keep the smoother one-line progression.
+                // If we change the scroll_offset.y, GPUI will render and trigger the next run loop.
+                // So, here we just adjust offset by `line_height` for move smooth.
+                scroll_offset.y =
                     if scroll_offset.y + cursor_pos.y > bounds.size.height - top_bottom_margin {
                         // cursor is out of bottom
-                        scroll_offset.y -= line_height;
+                        scroll_offset.y - line_height
                     } else if scroll_offset.y + cursor_pos.y < top_bottom_margin {
                         // cursor is out of top
-                        scroll_offset.y = (scroll_offset.y + line_height).min(px(0.));
-                    }
-                }
+                        (scroll_offset.y + line_height).min(px(0.))
+                    } else {
+                        scroll_offset.y
+                    };
 
                 // For selection to move scroll
                 if state.selection_reversed {
@@ -524,8 +513,7 @@ impl TextElement {
             return (0..1, visible_top);
         }
 
-        // visible_range is indexed by logical lines (state.text_wrapper.lines), not wrapped rows.
-        let total_lines = state.text_wrapper.lines.len().max(1);
+        let total_lines = state.text_wrapper.len();
         let scroll_top = if let Some(deferred_scroll_offset) = state.deferred_scroll_offset {
             deferred_scroll_offset.y
         } else {
