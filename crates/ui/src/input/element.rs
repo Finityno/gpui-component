@@ -1425,7 +1425,13 @@ impl Element for TextElement {
         // Paint blinking cursor
         if focused && show_cursor {
             if let Some(cursor_bounds) = prepaint.cursor_bounds_with_scroll() {
-                window.paint_quad(fill(cursor_bounds, cx.theme().caret));
+                let cursor_intersects_viewport = cursor_bounds.right() > input_bounds.left()
+                    && cursor_bounds.left() < input_bounds.right()
+                    && cursor_bounds.bottom() > input_bounds.top()
+                    && cursor_bounds.top() < input_bounds.bottom();
+                if cursor_intersects_viewport {
+                    window.paint_quad(fill(cursor_bounds, cx.theme().caret));
+                }
             }
         }
 
@@ -1484,8 +1490,6 @@ impl Element for TextElement {
             state.scroll_size = prepaint.scroll_size;
             state.update_scroll_offset(Some(prepaint.cursor_scroll_offset), cx);
             state.deferred_scroll_offset = None;
-
-            cx.notify();
         });
 
         if let Some(hitbox) = prepaint.hover_definition_hitbox.as_ref() {
