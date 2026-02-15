@@ -1,10 +1,10 @@
 use std::{ops::Range, rc::Rc};
 
 use gpui::{
-    App, Bounds, Corners, Element, ElementId, ElementInputHandler, Entity, GlobalElementId, Half,
-    HighlightStyle, Hitbox, Hsla, IntoElement, LayoutId, MouseButton, MouseMoveEvent, Path, Pixels,
-    Point, ShapedLine, SharedString, Size, Style, TextAlign, TextRun, TextStyle, UnderlineStyle,
-    Window, fill, point, px, relative, size,
+    App, Bounds, ContentMask, Corners, Element, ElementId, ElementInputHandler, Entity,
+    GlobalElementId, Half, HighlightStyle, Hitbox, Hsla, IntoElement, LayoutId, MouseButton,
+    MouseMoveEvent, Path, Pixels, Point, ShapedLine, SharedString, Size, Style, TextAlign, TextRun,
+    TextStyle, UnderlineStyle, Window, fill, point, px, relative, size,
 };
 use ropey::Rope;
 use smallvec::SmallVec;
@@ -1251,7 +1251,7 @@ impl Element for TextElement {
         let focused = focus_handle.is_focused(window);
         let bounds = prepaint.bounds;
         let selected_range = self.state.read(cx).selected_range;
-        let visible_range = &prepaint.last_layout.visible_range;
+        let visible_range_start = prepaint.last_layout.visible_range.start;
         let text_align = prepaint.last_layout.text_align;
 
         window.handle_input(
@@ -1271,18 +1271,21 @@ impl Element for TextElement {
             }
         }
 
-        // And reset focused_input when next_frame start
-        window.on_next_frame({
-            let state = self.state.clone();
-            move |window, cx| {
-                if !focused && Root::read(window, cx).focused_input.as_ref() == Some(&state) {
-                    Root::update(window, cx, |root, _, cx| {
-                        root.focused_input = None;
-                        cx.notify();
-                    });
+        // Reset focused_input at the start of the next frame when this element
+        // is no longer focused but still marked as focused_input.
+        if !focused && Root::read(window, cx).focused_input.as_ref() == Some(&self.state) {
+            window.on_next_frame({
+                let state = self.state.clone();
+                move |window, cx| {
+                    if Root::read(window, cx).focused_input.as_ref() == Some(&state) {
+                        Root::update(window, cx, |root, _, cx| {
+                            root.focused_input = None;
+                            cx.notify();
+                        });
+                    }
                 }
-            }
-        });
+            });
+        }
 
         // Paint multi line text
         let line_height = window.line_height();
@@ -1302,184 +1305,195 @@ impl Element for TextElement {
         }
         let active_line_color = cx.theme().highlight_theme.style.editor_active_line;
 
-        // Paint active line
-        let mut offset_y = px(0.);
-        if let Some(line_numbers) = prepaint.line_numbers.as_ref() {
-            offset_y += invisible_top_padding;
+        window.with_content_mask(
+            Some(ContentMask {
+                bounds: input_bounds,
+            }),
+            |window| {
+                // Paint active line
+                let mut offset_y = px(0.);
+                if let Some(line_numbers) = prepaint.line_numbers.as_ref() {
+                    offset_y += invisible_top_padding;
 
-            // Each item is the normal lines.
-            for (ix, lines) in line_numbers.iter().enumerate() {
-                let row = visible_range.start + ix;
-                let is_active = prepaint.current_row == Some(row);
-                let p = point(input_bounds.origin.x, origin.y + offset_y);
-                let height = line_height * lines.len() as f32;
-                // Paint the current line background
-                if is_active {
-                    if let Some(bg_color) = active_line_color {
-                        window.paint_quad(fill(
-                            Bounds::new(p, size(bounds.size.width, height)),
-                            bg_color,
-                        ));
+                    // Each item is the normal lines.
+                    for (ix, lines) in line_numbers.iter().enumerate() {
+                        let row = visible_range_start + ix;
+                        let is_active = prepaint.current_row == Some(row);
+                        let p = point(input_bounds.origin.x, origin.y + offset_y);
+                        let height = line_height * lines.len() as f32;
+                        // Paint the current line background
+                        if is_active {
+                            if let Some(bg_color) = active_line_color {
+                                window.paint_quad(fill(
+                                    Bounds::new(p, size(bounds.size.width, height)),
+                                    bg_color,
+                                ));
+                            }
+                        }
+                        offset_y += height;
                     }
                 }
-                offset_y += height;
-            }
-        }
 
-        // Paint indent guides
-        if let Some(path) = prepaint.indent_guides_path.take() {
-            window.paint_path(path, cx.theme().border.opacity(0.85));
-        }
-
-        // Paint selections
-        if window.is_window_active() {
-            let secondary_selection = cx.theme().selection.saturation(0.1);
-            for (path, is_active) in prepaint.search_match_paths.iter() {
-                window.paint_path(path.clone(), secondary_selection);
-
-                if *is_active {
-                    window.paint_path(path.clone(), cx.theme().selection);
+                // Paint indent guides
+                if let Some(path) = prepaint.indent_guides_path.take() {
+                    window.paint_path(path, cx.theme().border.opacity(0.85));
                 }
-            }
 
-            if let Some(path) = prepaint.selection_path.take() {
-                window.paint_path(path, cx.theme().selection);
-            }
+                // Paint selections
+                if window.is_window_active() {
+                    let secondary_selection = cx.theme().selection.saturation(0.1);
+                    for (path, is_active) in prepaint.search_match_paths.iter() {
+                        window.paint_path(path.clone(), secondary_selection);
 
-            // Paint hover highlight
-            if let Some(path) = prepaint.hover_highlight_path.take() {
-                window.paint_path(path, secondary_selection);
-            }
-        }
+                        if *is_active {
+                            window.paint_path(path.clone(), cx.theme().selection);
+                        }
+                    }
 
-        // Paint document colors
-        for (path, color) in prepaint.document_color_paths.iter() {
-            window.paint_path(path.clone(), *color);
-        }
+                    if let Some(path) = prepaint.selection_path.take() {
+                        window.paint_path(path, cx.theme().selection);
+                    }
 
-        // Paint text with inline completion ghost line support
-        let mut offset_y = mask_offset_y + invisible_top_padding;
-        let ghost_lines = &prepaint.ghost_lines;
-        let has_ghost_lines = !ghost_lines.is_empty();
+                    // Paint hover highlight
+                    if let Some(path) = prepaint.hover_highlight_path.take() {
+                        window.paint_path(path, secondary_selection);
+                    }
+                }
 
-        // Keep scrollbar offset always be positive，Start from the left position
-        let scroll_offset = if text_align == TextAlign::Right {
-            (prepaint.scroll_size.width - prepaint.bounds.size.width).max(px(0.))
-        } else if text_align == TextAlign::Center {
-            (prepaint.scroll_size.width - prepaint.bounds.size.width)
-                .half()
-                .max(px(0.))
-        } else {
-            px(0.)
-        };
+                // Paint document colors
+                for (path, color) in prepaint.document_color_paths.iter() {
+                    window.paint_path(path.clone(), *color);
+                }
 
-        for (ix, line) in prepaint.last_layout.lines.iter().enumerate() {
-            let row = visible_range.start + ix;
-            let p = point(
-                origin.x + prepaint.last_layout.line_number_width + (scroll_offset),
-                origin.y + offset_y,
-            );
+                // Paint text with inline completion ghost line support
+                let mut offset_y = mask_offset_y + invisible_top_padding;
+                let ghost_lines = &prepaint.ghost_lines;
+                let has_ghost_lines = !ghost_lines.is_empty();
 
-            // Paint the actual line
-            _ = line.paint(
-                p,
-                line_height,
-                text_align,
-                Some(prepaint.last_layout.content_width),
-                window,
-                cx,
-            );
-            offset_y += line.size(line_height).height;
+                // Keep scrollbar offset always be positive，Start from the left position
+                let scroll_offset = if text_align == TextAlign::Right {
+                    (prepaint.scroll_size.width - prepaint.bounds.size.width).max(px(0.))
+                } else if text_align == TextAlign::Center {
+                    (prepaint.scroll_size.width - prepaint.bounds.size.width)
+                        .half()
+                        .max(px(0.))
+                } else {
+                    px(0.)
+                };
 
-            // After the cursor row, paint ghost lines (which shifts subsequent content down)
-            if has_ghost_lines && Some(row) == prepaint.current_row {
-                let ghost_x = origin.x + prepaint.last_layout.line_number_width;
-
-                for ghost_line in ghost_lines {
-                    let ghost_p = point(ghost_x, origin.y + offset_y);
-
-                    // Paint semi-transparent background for ghost line
-                    let ghost_bounds = Bounds::new(
-                        ghost_p,
-                        size(
-                            bounds.size.width - prepaint.last_layout.line_number_width,
-                            line_height,
-                        ),
+                for (ix, line) in prepaint.last_layout.lines.iter().enumerate() {
+                    let row = visible_range_start + ix;
+                    let p = point(
+                        origin.x + prepaint.last_layout.line_number_width + (scroll_offset),
+                        origin.y + offset_y,
                     );
-                    window.paint_quad(fill(ghost_bounds, cx.theme().editor_background()));
 
-                    // Paint ghost line text
-                    _ = ghost_line.paint(
-                        ghost_p,
+                    // Paint the actual line
+                    _ = line.paint(
+                        p,
                         line_height,
                         text_align,
                         Some(prepaint.last_layout.content_width),
                         window,
                         cx,
                     );
-                    offset_y += line_height;
-                }
-            }
-        }
+                    offset_y += line.size(line_height).height;
 
-        // Paint blinking cursor
-        if focused && show_cursor {
-            if let Some(cursor_bounds) = prepaint.cursor_bounds_with_scroll() {
-                let cursor_intersects_viewport = cursor_bounds.right() > input_bounds.left()
-                    && cursor_bounds.left() < input_bounds.right()
-                    && cursor_bounds.bottom() > input_bounds.top()
-                    && cursor_bounds.top() < input_bounds.bottom();
-                if cursor_intersects_viewport {
-                    window.paint_quad(fill(cursor_bounds, cx.theme().caret));
-                }
-            }
-        }
+                    // After the cursor row, paint ghost lines (which shifts subsequent content down)
+                    if has_ghost_lines && Some(row) == prepaint.current_row {
+                        let ghost_x = origin.x + prepaint.last_layout.line_number_width;
 
-        // Paint line numbers
-        let mut offset_y = px(0.);
-        if let Some(line_numbers) = prepaint.line_numbers.as_ref() {
-            offset_y += invisible_top_padding;
+                        for ghost_line in ghost_lines {
+                            let ghost_p = point(ghost_x, origin.y + offset_y);
 
-            window.paint_quad(fill(
-                Bounds {
-                    origin: input_bounds.origin,
-                    size: size(
-                        prepaint.last_layout.line_number_width - LINE_NUMBER_RIGHT_MARGIN,
-                        input_bounds.size.height + prepaint.ghost_lines_height,
-                    ),
-                },
-                cx.theme().editor_background(),
-            ));
+                            // Paint semi-transparent background for ghost line
+                            let ghost_bounds = Bounds::new(
+                                ghost_p,
+                                size(
+                                    bounds.size.width - prepaint.last_layout.line_number_width,
+                                    line_height,
+                                ),
+                            );
+                            window.paint_quad(fill(ghost_bounds, cx.theme().editor_background()));
 
-            // Each item is the normal lines.
-            for (ix, lines) in line_numbers.iter().enumerate() {
-                let row = visible_range.start + ix;
-
-                let p = point(input_bounds.origin.x, origin.y + offset_y);
-                let is_active = prepaint.current_row == Some(row);
-
-                let height = line_height * lines.len() as f32;
-                // paint active line number background
-                if is_active {
-                    if let Some(bg_color) = active_line_color {
-                        window.paint_quad(fill(
-                            Bounds::new(p, size(prepaint.last_layout.line_number_width, height)),
-                            bg_color,
-                        ));
+                            // Paint ghost line text
+                            _ = ghost_line.paint(
+                                ghost_p,
+                                line_height,
+                                text_align,
+                                Some(prepaint.last_layout.content_width),
+                                window,
+                                cx,
+                            );
+                            offset_y += line_height;
+                        }
                     }
                 }
 
-                for line in lines {
-                    _ = line.paint(p, line_height, TextAlign::Left, None, window, cx);
-                    offset_y += line_height;
+                // Paint blinking cursor
+                if focused && show_cursor {
+                    if let Some(cursor_bounds) = prepaint.cursor_bounds_with_scroll() {
+                        let cursor_intersects_viewport = cursor_bounds.right()
+                            > input_bounds.left()
+                            && cursor_bounds.left() < input_bounds.right()
+                            && cursor_bounds.bottom() > input_bounds.top()
+                            && cursor_bounds.top() < input_bounds.bottom();
+                        if cursor_intersects_viewport {
+                            window.paint_quad(fill(cursor_bounds, cx.theme().caret));
+                        }
+                    }
                 }
 
-                // Add ghost line height after cursor row for line numbers alignment
-                if !prepaint.ghost_lines.is_empty() && prepaint.current_row.is_some() {
-                    offset_y += prepaint.ghost_lines_height;
+                // Paint line numbers
+                let mut offset_y = px(0.);
+                if let Some(line_numbers) = prepaint.line_numbers.as_ref() {
+                    offset_y += invisible_top_padding;
+
+                    window.paint_quad(fill(
+                        Bounds {
+                            origin: input_bounds.origin,
+                            size: size(
+                                prepaint.last_layout.line_number_width - LINE_NUMBER_RIGHT_MARGIN,
+                                input_bounds.size.height + prepaint.ghost_lines_height,
+                            ),
+                        },
+                        cx.theme().editor_background(),
+                    ));
+
+                    // Each item is the normal lines.
+                    for (ix, lines) in line_numbers.iter().enumerate() {
+                        let row = visible_range_start + ix;
+
+                        let p = point(input_bounds.origin.x, origin.y + offset_y);
+                        let is_active = prepaint.current_row == Some(row);
+
+                        let height = line_height * lines.len() as f32;
+                        // paint active line number background
+                        if is_active {
+                            if let Some(bg_color) = active_line_color {
+                                window.paint_quad(fill(
+                                    Bounds::new(
+                                        p,
+                                        size(prepaint.last_layout.line_number_width, height),
+                                    ),
+                                    bg_color,
+                                ));
+                            }
+                        }
+
+                        for line in lines {
+                            _ = line.paint(p, line_height, TextAlign::Left, None, window, cx);
+                            offset_y += line_height;
+                        }
+
+                        // Add ghost line height after cursor row for line numbers alignment
+                        if !prepaint.ghost_lines.is_empty() && prepaint.current_row.is_some() {
+                            offset_y += prepaint.ghost_lines_height;
+                        }
+                    }
                 }
-            }
-        }
+            },
+        );
 
         self.state.update(cx, |state, cx| {
             state.last_layout = Some(prepaint.last_layout.clone());
@@ -1500,15 +1514,23 @@ impl Element for TextElement {
         if focused {
             if let Some(first_line) = &prepaint.ghost_first_line {
                 if let Some(cursor_bounds) = prepaint.cursor_bounds_with_scroll() {
-                    let first_line_x = cursor_bounds.origin.x + cursor_bounds.size.width;
-                    let p = point(first_line_x, cursor_bounds.origin.y);
+                    window.with_content_mask(
+                        Some(ContentMask {
+                            bounds: input_bounds,
+                        }),
+                        |window| {
+                            let first_line_x = cursor_bounds.origin.x + cursor_bounds.size.width;
+                            let p = point(first_line_x, cursor_bounds.origin.y);
 
-                    // Paint background to cover any existing text
-                    let bg_bounds = Bounds::new(p, size(first_line.width + px(4.), line_height));
-                    window.paint_quad(fill(bg_bounds, cx.theme().editor_background()));
+                            // Paint background to cover any existing text
+                            let bg_bounds =
+                                Bounds::new(p, size(first_line.width + px(4.), line_height));
+                            window.paint_quad(fill(bg_bounds, cx.theme().editor_background()));
 
-                    // Paint first line completion text
-                    _ = first_line.paint(p, line_height, text_align, None, window, cx);
+                            // Paint first line completion text
+                            _ = first_line.paint(p, line_height, text_align, None, window, cx);
+                        },
+                    );
                 }
             }
         }
