@@ -1277,7 +1277,10 @@ impl Element for TextElement {
             window.on_next_frame({
                 let state = self.state.clone();
                 move |window, cx| {
-                    if Root::read(window, cx).focused_input.as_ref() == Some(&state) {
+                    let is_still_unfocused = !state.read(cx).focus_handle.is_focused(window);
+                    if is_still_unfocused
+                        && Root::read(window, cx).focused_input.as_ref() == Some(&state)
+                    {
                         Root::update(window, cx, |root, _, cx| {
                             root.focused_input = None;
                             cx.notify();
@@ -1487,7 +1490,7 @@ impl Element for TextElement {
                         }
 
                         // Add ghost line height after cursor row for line numbers alignment
-                        if !prepaint.ghost_lines.is_empty() && prepaint.current_row.is_some() {
+                        if !prepaint.ghost_lines.is_empty() && is_active {
                             offset_y += prepaint.ghost_lines_height;
                         }
                     }
