@@ -8,8 +8,8 @@ use gpui::{
     EventEmitter, FocusHandle, Focusable, InteractiveElement as _, IntoElement, KeyBinding,
     KeyDownEvent, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement as _,
     Pixels, Point, Render, ScrollHandle, ScrollWheelEvent, ShapedLine, SharedString, Styled as _,
-    Subscription, Task, UTF16Selection, Window, actions, div, point, prelude::FluentBuilder as _,
-    px,
+    Subscription, Task, UTF16Selection, Window, actions, div, point,
+    prelude::FluentBuilder as _, px,
 };
 use gpui::{Half, TextAlign};
 use ropey::{Rope, RopeSlice};
@@ -95,12 +95,16 @@ actions!(
 #[derive(Clone)]
 pub enum InputEvent {
     Change,
-    PressEnter { secondary: bool },
+    PressEnter {
+        secondary: bool,
+    },
     Focus,
     Blur,
     /// Emitted when images are pasted from clipboard.
     /// Consumer should handle storing/displaying the images.
-    PasteImages { images: Vec<gpui::Image> },
+    PasteImages {
+        images: Vec<gpui::Image>,
+    },
 }
 
 pub(super) const CONTEXT: &str = "Input";
@@ -108,11 +112,7 @@ pub(super) const CONTEXT: &str = "Input";
 pub(crate) fn init(cx: &mut App) {
     cx.bind_keys([
         KeyBinding::new("backspace", Backspace, Some(CONTEXT)),
-        KeyBinding::new("shift-backspace", Backspace, Some(CONTEXT)),
-        #[cfg(target_os = "macos")]
-        KeyBinding::new("ctrl-backspace", Backspace, Some(CONTEXT)),
         KeyBinding::new("delete", Delete, Some(CONTEXT)),
-        KeyBinding::new("shift-delete", Delete, Some(CONTEXT)),
         #[cfg(target_os = "macos")]
         KeyBinding::new("cmd-backspace", DeleteToBeginningOfLine, Some(CONTEXT)),
         #[cfg(target_os = "macos")]
@@ -126,8 +126,7 @@ pub(crate) fn init(cx: &mut App) {
         #[cfg(not(target_os = "macos"))]
         KeyBinding::new("ctrl-delete", DeleteToNextWordEnd, Some(CONTEXT)),
         KeyBinding::new("enter", Enter { secondary: false }, Some(CONTEXT)),
-        KeyBinding::new("shift-enter", Enter { secondary: false }, Some(CONTEXT)),
-        KeyBinding::new("secondary-enter", Enter { secondary: true }, Some(CONTEXT)),
+        KeyBinding::new("shift-enter", Enter { secondary: true }, Some(CONTEXT)),
         KeyBinding::new("escape", Escape, Some(CONTEXT)),
         KeyBinding::new("up", MoveUp, Some(CONTEXT)),
         KeyBinding::new("down", MoveDown, Some(CONTEXT)),
@@ -324,7 +323,6 @@ pub struct InputState {
     pub(super) masked: bool,
     pub(super) clean_on_escape: bool,
     pub(super) soft_wrap: bool,
-    pub(super) show_whitespaces: bool,
     pub(super) pattern: Option<regex::Regex>,
     pub(super) validate: Option<Box<dyn Fn(&str, &mut Context<Self>) -> bool + 'static>>,
     pub(crate) scroll_handle: ScrollHandle,
@@ -419,7 +417,6 @@ impl InputState {
             masked: false,
             clean_on_escape: false,
             soft_wrap: true,
-            show_whitespaces: false,
             loading: false,
             pattern: None,
             validate: None,
@@ -639,7 +636,10 @@ impl InputState {
         cx: &mut Context<Self>,
     ) {
         self.history.ignore = true;
+        let was_disabled = self.disabled;
+        self.disabled = false;
         self.replace_text(value, window, cx);
+        self.disabled = was_disabled;
         self.history.ignore = false;
 
         // Ensure cursor to start when set text
@@ -654,8 +654,22 @@ impl InputState {
             self.lsp.reset();
         }
 
-        // Move scroll to top
+        // Invalidate stale layout state so the next render starts fresh.
+        // Without this, render_editor may draw a scrollbar using dimensions
+        // from the previous (now-replaced) content, producing a one-frame
+        // artifact (e.g. a half-visible scrollbar after clearing).
+        self.last_layout = None;
+        self.last_bounds = None;
+        self.scroll_size = gpui::size(px(0.), px(0.));
+
+        // Move scroll to top and discard any pending deferred scroll.
         self.scroll_handle.set_offset(point(px(0.), px(0.)));
+        self.deferred_scroll_offset = None;
+
+        // Re-pause the blink cursor so its 300ms visibility timer restarts
+        // from *now* rather than from the start of replace_text. Without this,
+        // the cursor blinks out ~300ms after the text change becomes visible.
+        self.pause_blink_cursor(cx);
 
         cx.notify();
     }
@@ -669,13 +683,10 @@ impl InputState {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let was_disabled = self.disabled;
-        self.disabled = false;
         let text: SharedString = text.into();
         let range_utf16 = self.range_to_utf16(&(self.cursor()..self.cursor()));
         self.replace_text_in_range_silent(Some(range_utf16), &text, window, cx);
         self.selected_range = (self.selected_range.end..self.selected_range.end).into();
-        self.disabled = was_disabled;
     }
 
     /// Replace text at the current cursor position.
@@ -687,12 +698,9 @@ impl InputState {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let was_disabled = self.disabled;
-        self.disabled = false;
         let text: SharedString = text.into();
         self.replace_text_in_range_silent(None, &text, window, cx);
         self.selected_range = (self.selected_range.end..self.selected_range.end).into();
-        self.disabled = was_disabled;
     }
 
     fn replace_text(
@@ -701,13 +709,10 @@ impl InputState {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let was_disabled = self.disabled;
-        self.disabled = false;
         let text: SharedString = text.into();
         let range = 0..self.text.chars().map(|c| c.len_utf16()).sum();
         self.replace_text_in_range_silent(Some(range), &text, window, cx);
         self.reset_highlighter(cx);
-        self.disabled = was_disabled;
     }
 
     /// Set with disabled mode.
@@ -750,12 +755,6 @@ impl InputState {
         self
     }
 
-    /// Set whether to show whitespace characters.
-    pub fn show_whitespaces(mut self, show: bool) -> Self {
-        self.show_whitespaces = show;
-        self
-    }
-
     /// Update the soft wrap mode for multi-line input, default is true.
     pub fn set_soft_wrap(&mut self, wrap: bool, _: &mut Window, cx: &mut Context<Self>) {
         debug_assert!(self.mode.is_multi_line());
@@ -776,12 +775,6 @@ impl InputState {
         } else {
             self.text_wrapper.set_wrap_width(None, cx);
         }
-        cx.notify();
-    }
-
-    /// Update whether to show whitespace characters.
-    pub fn set_show_whitespaces(&mut self, show: bool, _: &mut Window, cx: &mut Context<Self>) {
-        self.show_whitespaces = show;
         cx.notify();
     }
 
@@ -1381,7 +1374,8 @@ impl InputState {
         offset: Option<Point<Pixels>>,
         cx: &mut Context<Self>,
     ) {
-        let mut offset = offset.unwrap_or(self.scroll_handle.offset());
+        let current_offset = self.scroll_handle.offset();
+        let mut offset = offset.unwrap_or(current_offset);
         // In addition to left alignment, a cursor position will be reserved on the right side
         let safe_x_offset = if self.text_align == TextAlign::Left {
             px(0.)
@@ -1400,8 +1394,10 @@ impl InputState {
             offset.y.clamp(safe_y_range.start, safe_y_range.end)
         };
         offset.x = offset.x.clamp(safe_x_range.start, safe_x_range.end);
-        self.scroll_handle.set_offset(offset);
-        cx.notify();
+        if offset != current_offset {
+            self.scroll_handle.set_offset(offset);
+            cx.notify();
+        }
     }
 
     /// Scroll to make the given offset visible.
@@ -1527,7 +1523,7 @@ impl InputState {
             return;
         };
 
-        // Emit image paste events for consumers that handle attachments.
+        // Check for images first
         let images: Vec<gpui::Image> = clipboard
             .entries()
             .iter()
@@ -1545,6 +1541,7 @@ impl InputState {
             return;
         }
 
+        // Fall back to text paste
         let mut new_text = clipboard.text().unwrap_or_default();
         if !self.mode.is_multi_line() {
             new_text = new_text.replace('\n', "");
@@ -1787,12 +1784,19 @@ impl InputState {
         offset
     }
 
-    /// Returns the true to let InputElement to render cursor, when Input is focused and current BlinkCursor is visible.
+    /// Returns true to let InputElement render the cursor when the Input is
+    /// focused and the current BlinkCursor is visible.
+    ///
+    /// Note: we intentionally do NOT gate on `window.is_window_active()` here.
+    /// Window activation already controls the blink cursor via
+    /// `observe_window_activation` (start on activate, stop on deactivate).
+    /// Adding an extra `is_window_active` check causes the cursor to
+    /// disappear during transient window-inactive states on Windows (e.g.
+    /// keyboard shortcut processing), which leads to a visible flicker.
     pub(crate) fn show_cursor(&self, window: &Window, cx: &App) -> bool {
         (self.focus_handle.is_focused(window) || self.is_context_menu_open(cx))
             && !self.disabled
             && self.blink_cursor.read(cx).visible()
-            && window.is_window_active()
     }
 
     fn on_focus(&mut self, _: &mut Window, cx: &mut Context<Self>) {
@@ -1832,6 +1836,18 @@ impl InputState {
 
     pub(super) fn on_key_down(&mut self, _: &KeyDownEvent, _: &mut Window, cx: &mut Context<Self>) {
         self.pause_blink_cursor(cx);
+    }
+
+    fn reset_scroll_if_text_empty(&mut self) {
+        if self.text.len() != 0 {
+            return;
+        }
+
+        // Deleting all content can leave an old scroll offset for one frame,
+        // which paints placeholder/cursor outside the viewport.
+        let zero_offset = point(px(0.), px(0.));
+        self.scroll_handle.set_offset(zero_offset);
+        self.deferred_scroll_offset = Some(zero_offset);
     }
 
     pub(super) fn on_drag_move(
@@ -1916,20 +1932,27 @@ impl InputState {
         let wrap_width_changed = self.input_bounds.size.width != new_bounds.size.width;
         self.input_bounds = new_bounds;
 
-        // Update text_wrapper wrap_width if changed.
-        if let Some(last_layout) = self.last_layout.as_ref() {
-            if wrap_width_changed {
-                let wrap_width = if !self.soft_wrap {
-                    // None to disable wrapping (will use Pixels::MAX)
-                    None
-                } else {
-                    last_layout.wrap_width
-                };
+        // Keep auto-grow rows synchronized with the prepared text wrapper.
+        // This avoids stale one-line heights on the first large paste.
+        let Some(last_layout) = self.last_layout.as_ref() else {
+            return;
+        };
 
-                self.text_wrapper.set_wrap_width(wrap_width, cx);
-                self.mode.update_auto_grow(&self.text_wrapper);
-                cx.notify();
-            }
+        if wrap_width_changed {
+            let wrap_width = if !self.soft_wrap {
+                // None to disable wrapping (will use Pixels::MAX)
+                None
+            } else {
+                last_layout.wrap_width
+            };
+
+            self.text_wrapper.set_wrap_width(wrap_width, cx);
+        }
+
+        let previous_rows = self.mode.rows();
+        self.mode.update_auto_grow(&self.text_wrapper);
+        if wrap_width_changed || self.mode.rows() != previous_rows {
+            cx.notify();
         }
     }
 
@@ -2101,7 +2124,30 @@ impl EntityInputHandler for InputState {
         self.ime_marked_range.take();
         self.update_preferred_column();
         self.update_search(cx);
+        let previous_rows = self.mode.rows();
         self.mode.update_auto_grow(&self.text_wrapper);
+
+        // When auto-grow changes the row count, the element height will change on
+        // the next frame.  Eagerly update `last_bounds` height, `input_bounds`
+        // height, and `scroll_size` to match the new row count so that `scroll_to`
+        // (called right after paste) computes a correct offset for the future
+        // layout instead of using the stale pre-change height.
+        if self.mode.is_auto_grow() && self.mode.rows() != previous_rows {
+            if let Some(ref last_layout) = self.last_layout {
+                let line_height = last_layout.line_height;
+                let new_rows = self.mode.max_rows().min(self.mode.rows());
+                let new_height = new_rows as f32 * line_height;
+                if let Some(ref mut bounds) = self.last_bounds {
+                    bounds.size.height = new_height;
+                }
+                self.input_bounds.size.height = new_height;
+                let content_height = self.text_wrapper.len() as f32 * line_height;
+                self.scroll_size.height = content_height.max(new_height);
+            }
+        }
+
+        self.reset_scroll_if_text_empty();
+
         if !self.silent_replace_text {
             self.handle_completion_trigger(&range, &new_text, window, cx);
         }
@@ -2166,6 +2212,7 @@ impl EntityInputHandler for InputState {
                 .into();
         }
         self.mode.update_auto_grow(&self.text_wrapper);
+        self.reset_scroll_if_text_empty();
         self.history.start_grouping();
         self.push_history(&old_text, &range, new_text);
         cx.notify();
