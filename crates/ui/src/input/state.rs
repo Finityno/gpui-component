@@ -98,6 +98,9 @@ pub enum InputEvent {
     PressEnter { secondary: bool },
     Focus,
     Blur,
+    /// Emitted when images are pasted from clipboard.
+    /// Consumer should handle storing/displaying the images.
+    PasteImages { images: Vec<gpui::Image> },
 }
 
 pub(super) const CONTEXT: &str = "Input";
@@ -1520,15 +1523,35 @@ impl InputState {
     }
 
     pub(super) fn paste(&mut self, _: &Paste, window: &mut Window, cx: &mut Context<Self>) {
-        if let Some(clipboard) = cx.read_from_clipboard() {
-            let mut new_text = clipboard.text().unwrap_or_default();
-            if !self.mode.is_multi_line() {
-                new_text = new_text.replace('\n', "");
-            }
+        let Some(clipboard) = cx.read_from_clipboard() else {
+            return;
+        };
 
-            self.replace_text_in_range_silent(None, &new_text, window, cx);
-            self.scroll_to(self.cursor(), None, cx);
+        // Emit image paste events for consumers that handle attachments.
+        let images: Vec<gpui::Image> = clipboard
+            .entries()
+            .iter()
+            .filter_map(|entry| {
+                if let gpui::ClipboardEntry::Image(image) = entry {
+                    Some(image.clone())
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        if !images.is_empty() {
+            cx.emit(InputEvent::PasteImages { images });
+            return;
         }
+
+        let mut new_text = clipboard.text().unwrap_or_default();
+        if !self.mode.is_multi_line() {
+            new_text = new_text.replace('\n', "");
+        }
+
+        self.replace_text_in_range_silent(None, &new_text, window, cx);
+        self.scroll_to(self.cursor(), None, cx);
     }
 
     fn push_history(&mut self, text: &Rope, range: &Range<usize>, new_text: &str) {
