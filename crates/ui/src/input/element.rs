@@ -63,6 +63,7 @@ impl TextElement {
     fn layout_cursor(
         &self,
         last_layout: &LastLayout,
+        scroll_size: Size<Pixels>,
         bounds: &mut Bounds<Pixels>,
         _: &mut Window,
         cx: &mut App,
@@ -249,6 +250,29 @@ impl TextElement {
 
         if let Some(deferred_scroll_offset) = state.deferred_scroll_offset {
             scroll_offset = deferred_scroll_offset;
+        }
+
+        // Clamp the scroll offset to ensure it stays within bounds, avoiding
+        // 1-frame stutters when content shrinks (e.g. backspacing).
+        let safe_y_range = (-scroll_size.height + bounds.size.height).min(px(0.0))..px(0.);
+        let safe_x_offset = if last_layout.text_align == TextAlign::Left {
+            px(0.)
+        } else {
+            -CURSOR_WIDTH
+        };
+        let safe_x_range = (-scroll_size.width + bounds.size.width + safe_x_offset)
+            .min(safe_x_offset)..px(0.);
+
+        scroll_offset.y = if state.mode.is_single_line() {
+            px(0.)
+        } else {
+            scroll_offset.y.clamp(safe_y_range.start, safe_y_range.end)
+        };
+        scroll_offset.x = scroll_offset.x.clamp(safe_x_range.start, safe_x_range.end);
+
+        // Update cursor bounds X to match the clamped scroll_offset.x
+        if let Some(ref mut cb) = cursor_bounds {
+            cb.origin.x = bounds.left() + cursor_pos.unwrap_or_default().x + line_number_width + scroll_offset.x;
         }
 
         bounds.origin = bounds.origin + scroll_offset;
@@ -1253,7 +1277,7 @@ impl Element for TextElement {
         // Calculate the scroll offset to keep the cursor in view
 
         let (cursor_bounds, cursor_scroll_offset, current_row) =
-            self.layout_cursor(&last_layout, &mut bounds, window, cx);
+            self.layout_cursor(&last_layout, scroll_size, &mut bounds, window, cx);
         last_layout.cursor_bounds = cursor_bounds;
 
         let search_match_paths = self.layout_search_matches(&last_layout, &mut bounds, cx);
@@ -1569,7 +1593,8 @@ impl Element for TextElement {
                 }
 
                 for line in lines {
-                    _ = line.paint(p, line_height, TextAlign::Left, None, window, cx);
+                    let line_point = point(input_bounds.origin.x, origin.y + offset_y);
+                    _ = line.paint(line_point, line_height, TextAlign::Left, None, window, cx);
                     offset_y += line_height;
                 }
 

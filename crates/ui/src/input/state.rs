@@ -1411,9 +1411,21 @@ impl InputState {
         cx: &mut Context<Self>,
     ) {
         let Some(last_layout) = self.last_layout.as_ref() else {
+            // Even without layout, set a basic deferred scroll so the first
+            // render after a paste scrolls to approximately the right position
+            let display_point = self.text_wrapper.offset_to_display_point(offset);
+            let estimated_line_height = px(20.);
+            let row_y = display_point.row as f32 * estimated_line_height;
+            self.deferred_scroll_offset = Some(point(px(0.), -row_y));
+            cx.notify();
             return;
         };
         let Some(bounds) = self.last_bounds.as_ref() else {
+            let display_point = self.text_wrapper.offset_to_display_point(offset);
+            let line_height = last_layout.line_height;
+            let row_y = display_point.row as f32 * line_height;
+            self.deferred_scroll_offset = Some(point(px(0.), -row_y));
+            cx.notify();
             return;
         };
 
@@ -1422,17 +1434,10 @@ impl InputState {
         let line_height = last_layout.line_height;
 
         let point = self.text.offset_to_point(offset);
-
         let row = point.row;
 
-        let mut row_offset_y = px(0.);
-        for (ix, wrap_line) in self.text_wrapper.lines.iter().enumerate() {
-            if ix == row {
-                break;
-            }
-
-            row_offset_y += wrap_line.height(line_height);
-        }
+        let display_point = self.text_wrapper.offset_to_display_point(offset);
+        let row_offset_y = display_point.row as f32 * line_height;
 
         // Apart from left alignment, just leave enough space for the cursor size on the right side.
         let safety_margin = if last_layout.text_align == TextAlign::Left {
@@ -1444,11 +1449,10 @@ impl InputState {
             .lines
             .get(row.saturating_sub(last_layout.visible_range.start))
         {
-            // Check to scroll horizontally and soft wrap lines
+            // Check to scroll horizontally
             if let Some(pos) = line.position_for_index(point.column, last_layout) {
                 let bounds_width = bounds.size.width - last_layout.line_number_width;
                 let col_offset_x = pos.x;
-                row_offset_y += pos.y;
                 if col_offset_x - safety_margin < -scroll_offset.x {
                     // If the position is out of the visible area, scroll to make it visible
                     scroll_offset.x = -col_offset_x + safety_margin;
