@@ -74,21 +74,35 @@ impl BlinkCursor {
         self.paused || self.visible
     }
 
-    /// Pause the blinking, and delay 500ms to resume the blinking.
+    /// Pause the blinking, and delay to resume the blinking.
+    ///
+    /// After the delay the cursor stays visible for one full blink interval
+    /// before toggling, so it doesn't flash off immediately after a text edit.
     pub fn pause(&mut self, cx: &mut Context<Self>) {
         self.paused = true;
         self.visible = true;
         cx.notify();
 
-        // delay 500ms to start the blinking
-        let epoch = self.next_epoch();
+        // Advance epoch to cancel any in-flight blink task.
+        self.next_epoch();
         self._task = cx.spawn(async move |this, cx| {
             cx.background_executor().timer(PAUSE_DELAY).await;
 
             if let Some(this) = this.upgrade() {
                 this.update(cx, |this, cx| {
                     this.paused = false;
-                    this.blink(epoch, cx);
+                    // Keep visible and schedule the first toggle after a full
+                    // interval so the cursor doesn't disappear right away.
+                    this.visible = true;
+                    cx.notify();
+
+                    let epoch = this.next_epoch();
+                    this._task = cx.spawn(async move |this, cx| {
+                        cx.background_executor().timer(INTERVAL).await;
+                        if let Some(this) = this.upgrade() {
+                            this.update(cx, |this, cx| this.blink(epoch, cx));
+                        }
+                    });
                 });
             }
         });
