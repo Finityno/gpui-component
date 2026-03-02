@@ -1,8 +1,7 @@
 use std::ops::Range;
 
 use gpui::{
-    App, Font, Half, LineFragment, Pixels, Point, ShapedLine, Size, TextAlign, Window, point, px,
-    size,
+    App, Font, LineFragment, Pixels, Point, ShapedLine, Size, TextAlign, Window, point, px, size,
 };
 use ropey::Rope;
 use smallvec::SmallVec;
@@ -398,34 +397,6 @@ impl LineLayout {
             .unwrap_or_default();
         self.longest_width = width;
         self.wrapped_lines = wrapped_lines;
-    }
-
-    pub(crate) fn with_whitespaces(mut self, indicators: Option<WhitespaceIndicators>) -> Self {
-        self.whitespace_indicators = indicators;
-        let Some(indicators) = self.whitespace_indicators.as_ref() else {
-            return self;
-        };
-
-        let space_indicator_offset = indicators.space.width.half();
-
-        for (line_index, wrapped_line) in self.wrapped_lines.iter().enumerate() {
-            for (relative_offset, c) in wrapped_line.text.char_indices() {
-                if matches!(c, ' ' | '\t') {
-                    let is_tab = c == '\t';
-                    let start_x = wrapped_line.x_for_index(relative_offset);
-                    let end_x = wrapped_line.x_for_index(relative_offset + c.len_utf8());
-                    // Center the indicator in the actual character's space
-                    let x_position = if c == ' ' {
-                        (start_x + end_x).half() - space_indicator_offset
-                    } else {
-                        start_x
-                    };
-
-                    self.whitespace_chars.push((line_index, x_position, is_tab));
-                }
-            }
-        }
-        self
     }
 
     #[inline]
