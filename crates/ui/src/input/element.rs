@@ -1,10 +1,10 @@
 use std::{ops::Range, rc::Rc};
 
 use gpui::{
-    App, Bounds, ContentMask, Corners, Element, ElementId, ElementInputHandler, Entity,
-    GlobalElementId, Half, HighlightStyle, Hitbox, Hsla, IntoElement, LayoutId, MouseButton,
-    MouseMoveEvent, Path, Pixels, Point, ShapedLine, SharedString, Size, Style, TextAlign, TextRun,
-    TextStyle, UnderlineStyle, Window, fill, point, px, relative, size,
+    App, BorderStyle, Bounds, ContentMask, Corners, Edges, Element, ElementId, ElementInputHandler,
+    Entity, GlobalElementId, Half, HighlightStyle, Hitbox, Hsla, IntoElement, LayoutId,
+    MouseButton, MouseMoveEvent, Path, Pixels, Point, ShapedLine, SharedString, Size, Style,
+    TextAlign, TextRun, TextStyle, UnderlineStyle, Window, fill, point, px, quad, relative, size,
 };
 use ropey::Rope;
 use smallvec::SmallVec;
@@ -14,7 +14,7 @@ use crate::{
     input::{RopeExt as _, blink_cursor::CURSOR_WIDTH, text_wrapper::LineLayout},
 };
 
-use super::{InputState, LastLayout, mode::InputMode};
+use super::{InlineBadge, InputState, LastLayout, mode::InputMode};
 
 const BOTTOM_MARGIN_ROWS: usize = 3;
 pub(super) const RIGHT_MARGIN: Pixels = px(10.);
@@ -268,8 +268,8 @@ impl TextElement {
         } else {
             -CURSOR_WIDTH
         };
-        let safe_x_range = (-scroll_size.width + bounds.size.width + safe_x_offset)
-            .min(safe_x_offset)..px(0.);
+        let safe_x_range =
+            (-scroll_size.width + bounds.size.width + safe_x_offset).min(safe_x_offset)..px(0.);
 
         scroll_offset.y = if state.mode.is_single_line() {
             px(0.)
@@ -280,7 +280,10 @@ impl TextElement {
 
         // Update cursor bounds X to match the clamped scroll_offset.x
         if let Some(ref mut cb) = cursor_bounds {
-            cb.origin.x = bounds.left() + cursor_pos.unwrap_or_default().x + line_number_width + scroll_offset.x;
+            cb.origin.x = bounds.left()
+                + cursor_pos.unwrap_or_default().x
+                + line_number_width
+                + scroll_offset.x;
         }
 
         bounds.origin = bounds.origin + scroll_offset;
@@ -701,8 +704,18 @@ impl TextElement {
         let text_wrapper = &state.text_wrapper;
         let visible_range = &last_layout.visible_range;
         let visible_range_offset = &last_layout.visible_range_offset;
+        let inline_badge_segments = state
+            .inline_badges
+            .iter()
+            .map(|badge| (badge.range.clone(), badge.style.foreground_color))
+            .collect::<Vec<_>>();
 
         if is_single_line {
+            let runs = if state.inline_badges.is_empty() {
+                runs.to_vec()
+            } else {
+                split_runs_by_inline_badges(0, runs, &inline_badge_segments)
+            };
             let shaped_line = window.text_system().shape_line(
                 display_text.to_string().into(),
                 font_size,
@@ -756,6 +769,15 @@ impl TextElement {
                         visible_range_offset.start + offset,
                         &line_runs,
                         bg_segments,
+                    )
+                };
+                let line_runs = if state.inline_badges.is_empty() {
+                    line_runs
+                } else {
+                    split_runs_by_inline_badges(
+                        visible_range_offset.start + offset,
+                        &line_runs,
+                        &inline_badge_segments,
                     )
                 };
 
@@ -854,6 +876,7 @@ pub(super) struct PrepaintState {
     document_color_paths: Vec<(Path<Pixels>, Hsla)>,
     hover_definition_hitbox: Option<Hitbox>,
     indent_guides_path: Option<Path<Pixels>>,
+    inline_badges_by_line: Vec<Vec<(Range<usize>, InlineBadge)>>,
     bounds: Bounds<Pixels>,
     // Inline completion rendering data
     /// Shaped ghost lines to paint after cursor row (completion lines 2+)
@@ -1190,6 +1213,17 @@ impl Element for TextElement {
             self.layout_document_colors(&document_colors, &last_layout, &bounds);
 
         let state = self.state.read(cx);
+        let inline_badges_by_line = if state.inline_badges.is_empty() || is_empty {
+            Vec::new()
+        } else {
+            (last_layout.visible_range.start..last_layout.visible_range.end)
+                .map(|row| {
+                    let line_start = state.text.line_start_offset(row);
+                    let line_end = state.text.line_end_offset(row);
+                    state.inline_badges_for_line(&(line_start..line_end))
+                })
+                .collect()
+        };
         let line_numbers = if state.mode.line_number() {
             let mut line_numbers = vec![];
             let other_line_runs = vec![TextRun {
@@ -1254,6 +1288,7 @@ impl Element for TextElement {
             hover_definition_hitbox,
             document_color_paths,
             indent_guides_path,
+            inline_badges_by_line,
             ghost_first_line,
             ghost_lines,
             ghost_lines_height,
@@ -1414,6 +1449,79 @@ impl Element for TextElement {
                         origin.x + prepaint.last_layout.line_number_width + (scroll_offset),
                         origin.y + offset_y,
                     );
+                    if let Some(badges) = prepaint.inline_badges_by_line.get(ix) {
+                        for (range, badge) in badges {
+                            let Some(start_pos) =
+                                line.position_for_index(range.start, &prepaint.last_layout)
+                            else {
+                                continue;
+                            };
+                            let Some(end_pos) =
+                                line.position_for_index(range.end, &prepaint.last_layout)
+                            else {
+                                continue;
+                            };
+
+                            let start_visual_line = (start_pos.y / line_height).floor() as usize;
+                            let end_visual_line = (end_pos.y / line_height).floor() as usize;
+
+                            for visual_line in start_visual_line..=end_visual_line {
+                                let x_start = if visual_line == start_visual_line {
+                                    start_pos.x
+                                } else {
+                                    px(0.)
+                                };
+                                let x_end = if visual_line == end_visual_line {
+                                    end_pos.x
+                                } else {
+                                    prepaint.last_layout.content_width
+                                };
+                                let pill_origin = point(
+                                    p.x + x_start - badge.style.leading_padding,
+                                    p.y + line_height * visual_line as f32
+                                        + badge.style.vertical_inset,
+                                );
+                                let pill_size = size(
+                                    x_end - x_start
+                                        + badge.style.leading_padding
+                                        + badge.style.trailing_padding,
+                                    line_height - badge.style.vertical_inset * 2.,
+                                );
+                                let pill_bounds = Bounds::new(pill_origin, pill_size);
+                                window.paint_quad(quad(
+                                    pill_bounds,
+                                    Corners::all(badge.style.corner_radius)
+                                        .clamp_radii_for_quad_size(pill_size),
+                                    badge.style.background_color,
+                                    Edges::default(),
+                                    gpui::transparent_black(),
+                                    BorderStyle::default(),
+                                ));
+
+                                if visual_line == start_visual_line
+                                    && let Some(icon_path) = badge.style.icon_path.clone()
+                                {
+                                    let icon_bounds = Bounds::new(
+                                        point(
+                                            p.x + x_start + badge.style.icon_left_inset,
+                                            pill_bounds.origin.y
+                                                + (pill_bounds.size.height - badge.style.icon_size)
+                                                    / 2.,
+                                        ),
+                                        size(badge.style.icon_size, badge.style.icon_size),
+                                    );
+                                    let _ = window.paint_svg(
+                                        icon_bounds,
+                                        icon_path,
+                                        None,
+                                        Default::default(),
+                                        badge.style.foreground_color,
+                                        cx,
+                                    );
+                                }
+                            }
+                        }
+                    }
 
                     // Paint the actual line
                     _ = line.paint(
@@ -1656,13 +1764,67 @@ fn split_runs_by_bg_segments(
                     ..run.clone()
                 });
 
-                cursor = bg_range.end;
+                cursor = overlap_end;
                 run_start = cursor;
             }
         }
 
         if run_end > cursor {
             // Add the part after the background range
+            result.push(TextRun {
+                len: run_end - cursor,
+                ..run.clone()
+            });
+        }
+
+        cursor = run_end;
+    }
+
+    result
+}
+
+fn split_runs_by_inline_badges(
+    start_offset: usize,
+    runs: &[TextRun],
+    inline_badges: &[(Range<usize>, Hsla)],
+) -> Vec<TextRun> {
+    if inline_badges.is_empty() {
+        return runs.to_vec();
+    }
+
+    let mut result = vec![];
+    let mut cursor = start_offset;
+    for run in runs {
+        let mut run_start = cursor;
+        let run_end = cursor + run.len;
+
+        for (badge_range, foreground_color) in inline_badges {
+            if run_end <= badge_range.start || run_start >= badge_range.end {
+                continue;
+            }
+
+            if run_start < badge_range.start {
+                result.push(TextRun {
+                    len: badge_range.start - run_start,
+                    ..run.clone()
+                });
+            }
+
+            let overlap_start = run_start.max(badge_range.start);
+            let overlap_end = run_end.min(badge_range.end);
+            let run_len = overlap_end.saturating_sub(overlap_start);
+            if run_len > 0 {
+                result.push(TextRun {
+                    len: run_len,
+                    color: *foreground_color,
+                    ..run.clone()
+                });
+                cursor = overlap_end;
+                run_start = cursor;
+            }
+        }
+
+        if run_end > cursor {
             result.push(TextRun {
                 len: run_end - cursor,
                 ..run.clone()

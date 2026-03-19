@@ -307,10 +307,8 @@ impl SheetStory {
                                             .confirm()
                                             .child("Confirm dialog opened from sheet.")
                                             .on_ok(|_, window, cx| {
-                                                window.push_notification(
-                                                    "You have pressed ok.",
-                                                    cx,
-                                                );
+                                                window
+                                                    .push_notification("You have pressed ok.", cx);
                                                 true
                                             })
                                             .on_cancel(|_, window, cx| {

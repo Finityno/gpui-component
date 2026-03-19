@@ -5,11 +5,11 @@
 use anyhow::Result;
 use gpui::{
     Action, App, AppContext, Bounds, ClipboardItem, Context, Entity, EntityInputHandler,
-    EventEmitter, FocusHandle, Focusable, InteractiveElement as _, IntoElement, KeyBinding,
+    EventEmitter, FocusHandle, Focusable, Hsla, InteractiveElement as _, IntoElement, KeyBinding,
     KeyDownEvent, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement as _,
     Pixels, Point, Render, ScrollHandle, ScrollWheelEvent, ShapedLine, SharedString, Styled as _,
-    Subscription, Task, UTF16Selection, Window, actions, div, point,
-    prelude::FluentBuilder as _, px,
+    Subscription, Task, UTF16Selection, Window, actions, div, point, prelude::FluentBuilder as _,
+    px,
 };
 use gpui::{Half, TextAlign};
 use ropey::{Rope, RopeSlice};
@@ -95,6 +95,9 @@ actions!(
 #[derive(Clone)]
 pub enum InputEvent {
     Change,
+    InlineBadgeClick {
+        id: uuid::Uuid,
+    },
     PressEnter {
         secondary: bool,
     },
@@ -105,6 +108,79 @@ pub enum InputEvent {
     PasteImages {
         images: Vec<gpui::Image>,
     },
+}
+
+#[derive(Clone)]
+pub struct InlineBadgeStyle {
+    pub background_color: Hsla,
+    pub foreground_color: Hsla,
+    pub icon_path: Option<SharedString>,
+    pub leading_padding: Pixels,
+    pub trailing_padding: Pixels,
+    pub vertical_inset: Pixels,
+    pub corner_radius: Pixels,
+    pub icon_size: Pixels,
+    pub icon_left_inset: Pixels,
+    pub icon_top_inset: Pixels,
+}
+
+impl InlineBadgeStyle {
+    pub fn new(background_color: Hsla, foreground_color: Hsla) -> Self {
+        Self {
+            background_color,
+            foreground_color,
+            icon_path: None,
+            leading_padding: px(2.),
+            trailing_padding: px(6.),
+            vertical_inset: px(2.),
+            corner_radius: px(2.),
+            icon_size: px(12.),
+            icon_left_inset: px(4.),
+            icon_top_inset: px(5.),
+        }
+    }
+
+    pub fn icon_path(mut self, icon_path: impl Into<SharedString>) -> Self {
+        self.icon_path = Some(icon_path.into());
+        self
+    }
+
+    pub fn leading_padding(mut self, leading_padding: Pixels) -> Self {
+        self.leading_padding = leading_padding;
+        self
+    }
+
+    pub fn trailing_padding(mut self, trailing_padding: Pixels) -> Self {
+        self.trailing_padding = trailing_padding;
+        self
+    }
+
+    pub fn vertical_inset(mut self, vertical_inset: Pixels) -> Self {
+        self.vertical_inset = vertical_inset;
+        self
+    }
+
+    pub fn corner_radius(mut self, corner_radius: Pixels) -> Self {
+        self.corner_radius = corner_radius;
+        self
+    }
+
+    pub fn icon_size(mut self, icon_size: Pixels) -> Self {
+        self.icon_size = icon_size;
+        self
+    }
+
+    pub fn icon_left_inset(mut self, icon_left_inset: Pixels) -> Self {
+        self.icon_left_inset = icon_left_inset;
+        self
+    }
+}
+
+#[derive(Clone)]
+pub struct InlineBadge {
+    pub id: uuid::Uuid,
+    pub range: Range<usize>,
+    pub style: InlineBadgeStyle,
 }
 
 pub(super) const CONTEXT: &str = "Input";
@@ -346,6 +422,7 @@ pub struct InputState {
     pub(super) hover_popover: Option<Entity<HoverPopover>>,
     /// The LSP definitions locations for "Go to Definition" feature.
     pub(super) hover_definition: HoverDefinition,
+    pub(super) inline_badges: Vec<InlineBadge>,
 
     pub lsp: Lsp,
 
@@ -439,6 +516,7 @@ impl InputState {
             completion_inserting: false,
             hover_popover: None,
             hover_definition: HoverDefinition::default(),
+            inline_badges: Vec::new(),
             silent_replace_text: false,
             size: Size::default(),
             _subscriptions,
@@ -845,6 +923,87 @@ impl InputState {
         &self.text
     }
 
+    pub fn inline_badges(&self) -> &[InlineBadge] {
+        &self.inline_badges
+    }
+
+    pub fn insert_inline_badge(
+        &mut self,
+        id: uuid::Uuid,
+        display_text: &str,
+        style: InlineBadgeStyle,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let insertion_range = self.selected_range.start..self.selected_range.end;
+        self.replace_range_with_inline_badge(insertion_range, id, display_text, style, window, cx);
+    }
+
+    pub fn replace_range_with_inline_badge(
+        &mut self,
+        insertion_range: Range<usize>,
+        id: uuid::Uuid,
+        display_text: &str,
+        style: InlineBadgeStyle,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let safe_start = self.text.clip_offset(insertion_range.start, Bias::Left);
+        let safe_end = self.text.clip_offset(insertion_range.end, Bias::Right);
+        let normalized_range = self.normalize_inline_badge_edit_range(safe_start..safe_end);
+
+        let mut inserted_text = String::with_capacity(display_text.len() + 1);
+        inserted_text.push_str(display_text);
+        inserted_text.push(' ');
+
+        self.replace_text_in_range_silent(
+            Some(self.range_to_utf16(&normalized_range)),
+            &inserted_text,
+            window,
+            cx,
+        );
+
+        let badge_end = normalized_range.start + display_text.len();
+        self.inline_badges.push(InlineBadge {
+            id,
+            range: normalized_range.start..badge_end,
+            style,
+        });
+        self.inline_badges.sort_by_key(|badge| badge.range.start);
+        cx.notify();
+    }
+
+    pub fn remove_inline_badge(
+        &mut self,
+        id: uuid::Uuid,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some(range) = self
+            .inline_badges
+            .iter()
+            .find(|badge| badge.id == id)
+            .map(|badge| badge.range.clone())
+        else {
+            return false;
+        };
+
+        self.replace_text_in_range_silent(Some(self.range_to_utf16(&range)), "", window, cx);
+        true
+    }
+
+    pub fn clear_inline_badges(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let badges = self.inline_badges.clone();
+        for badge in badges.into_iter().rev() {
+            self.replace_text_in_range_silent(
+                Some(self.range_to_utf16(&badge.range)),
+                "",
+                window,
+                cx,
+            );
+        }
+    }
+
     /// Return the (0-based) [`Position`] of the cursor.
     pub fn cursor_position(&self) -> Position {
         let offset = self.cursor();
@@ -966,6 +1125,11 @@ impl InputState {
 
     /// Return the start offset of the previous word.
     pub(super) fn previous_start_of_word(&mut self) -> usize {
+        if let Some(badge) = self.inline_badge_touching_previous_boundary(self.selected_range.start)
+        {
+            return badge.range.start;
+        }
+
         let offset = self.selected_range.start;
         let offset = self.offset_from_utf16(self.offset_to_utf16(offset));
         // FIXME: Avoid to_string
@@ -979,6 +1143,10 @@ impl InputState {
 
     /// Return the next end offset of the next word.
     pub(super) fn next_end_of_word(&mut self) -> usize {
+        if let Some(badge) = self.inline_badge_touching_next_boundary(self.cursor()) {
+            return badge.range.end;
+        }
+
         let offset = self.cursor();
         let offset = self.offset_from_utf16(self.offset_to_utf16(offset));
         let right_part = self.text.slice(offset..self.text.len()).to_string();
@@ -1263,6 +1431,15 @@ impl InputState {
         }
 
         self.selecting = true;
+
+        if event.button == MouseButton::Left
+            && let Some(id) = self.inline_badge_id_for_mouse_position(event.position)
+        {
+            self.selecting = false;
+            cx.emit(InputEvent::InlineBadgeClick { id });
+            return;
+        }
+
         let offset = self.index_for_mouse_position(event.position);
 
         if self.handle_click_hover_definition(event, offset, window, cx) {
@@ -1672,12 +1849,14 @@ impl InputState {
             index
         };
 
-        if self.masked {
+        let index = if self.masked {
             // When is masked, the index is char index, need convert to byte index.
             self.text.char_index_to_offset(index)
         } else {
             index
-        }
+        };
+
+        self.snap_offset_outside_inline_badge(index)
     }
 
     /// Returns a y offsetted point for the line origin.
@@ -1708,7 +1887,7 @@ impl InputState {
     pub(crate) fn select_to(&mut self, offset: usize, cx: &mut Context<Self>) {
         self.clear_inline_completion(cx);
 
-        let offset = offset.clamp(0, self.text.len());
+        let offset = self.snap_offset_outside_inline_badge(offset.clamp(0, self.text.len()));
         if self.selection_reversed {
             self.selected_range.start = offset
         } else {
@@ -1762,7 +1941,94 @@ impl InputState {
         self.offset_from_utf16(range_utf16.start)..self.offset_from_utf16(range_utf16.end)
     }
 
+    pub(crate) fn inline_badges_for_line(
+        &self,
+        line_range: &Range<usize>,
+    ) -> Vec<(Range<usize>, InlineBadge)> {
+        self.inline_badges
+            .iter()
+            .filter_map(|badge| {
+                if badge.range.end <= line_range.start || badge.range.start >= line_range.end {
+                    return None;
+                }
+
+                Some((
+                    (badge.range.start - line_range.start)
+                        ..(badge.range.end.min(line_range.end) - line_range.start),
+                    badge.clone(),
+                ))
+            })
+            .collect()
+    }
+
+    pub(crate) fn snap_offset_outside_inline_badge(&self, offset: usize) -> usize {
+        let Some(badge) = self.inline_badge_containing_offset(offset) else {
+            return offset.clamp(0, self.text.len());
+        };
+
+        let distance_to_start = offset.saturating_sub(badge.range.start);
+        let distance_to_end = badge.range.end.saturating_sub(offset);
+        if distance_to_start <= distance_to_end {
+            badge.range.start
+        } else {
+            badge.range.end
+        }
+    }
+
+    fn inline_badge_containing_offset(&self, offset: usize) -> Option<&InlineBadge> {
+        self.inline_badges
+            .iter()
+            .find(|badge| badge.range.start < offset && offset < badge.range.end)
+    }
+
+    fn inline_badge_touching_previous_boundary(&self, offset: usize) -> Option<&InlineBadge> {
+        self.inline_badges
+            .iter()
+            .find(|badge| badge.range.start < offset && offset <= badge.range.end)
+    }
+
+    fn inline_badge_touching_next_boundary(&self, offset: usize) -> Option<&InlineBadge> {
+        self.inline_badges
+            .iter()
+            .find(|badge| badge.range.start <= offset && offset < badge.range.end)
+    }
+
+    fn normalize_inline_badge_edit_range(&self, mut range: Range<usize>) -> Range<usize> {
+        for badge in &self.inline_badges {
+            if badge.range.end <= range.start || badge.range.start >= range.end {
+                continue;
+            }
+
+            range.start = range.start.min(badge.range.start);
+            range.end = range.end.max(badge.range.end);
+        }
+
+        range
+    }
+
+    fn shift_inline_badges_after(&mut self, offset: usize, delta: isize) {
+        if delta == 0 {
+            return;
+        }
+
+        for badge in &mut self.inline_badges {
+            if badge.range.start >= offset {
+                badge.range.start = badge.range.start.saturating_add_signed(delta);
+                badge.range.end = badge.range.end.saturating_add_signed(delta);
+            }
+        }
+    }
+
+    fn remove_inline_badges_intersecting(&mut self, range: &Range<usize>) {
+        self.inline_badges
+            .retain(|badge| badge.range.start >= range.end || range.start >= badge.range.end);
+    }
+
     pub(super) fn previous_boundary(&self, offset: usize) -> usize {
+        if let Some(badge) = self.inline_badge_touching_previous_boundary(offset) {
+            return badge.range.start;
+        }
+
         let mut offset = self.text.clip_offset(offset.saturating_sub(1), Bias::Left);
         if let Some(ch) = self.text.char_at(offset) {
             if ch == '\r' {
@@ -1774,6 +2040,10 @@ impl InputState {
     }
 
     pub(super) fn next_boundary(&self, offset: usize) -> usize {
+        if let Some(badge) = self.inline_badge_touching_next_boundary(offset) {
+            return badge.range.end;
+        }
+
         let mut offset = self.text.clip_offset(offset + 1, Bias::Right);
         if let Some(ch) = self.text.char_at(offset) {
             if ch == '\r' {
@@ -1962,6 +2232,62 @@ impl InputState {
         self.text.slice(range)
     }
 
+    fn inline_badge_id_for_mouse_position(&self, position: Point<Pixels>) -> Option<uuid::Uuid> {
+        let last_layout = self.last_layout.as_ref()?;
+        let last_bounds = self.last_bounds?;
+        let line_height = last_layout.line_height;
+
+        for badge in &self.inline_badges {
+            let (start_line_index, start_subline_index, start_pos) =
+                self.line_and_position_for_offset(badge.range.start);
+            let (end_line_index, end_subline_index, end_pos) =
+                self.line_and_position_for_offset(badge.range.end);
+
+            let Some(start_pos) = start_pos else {
+                continue;
+            };
+            let Some(end_pos) = end_pos else {
+                continue;
+            };
+
+            if start_line_index != end_line_index {
+                continue;
+            }
+
+            let line_origin_y = start_pos.y - line_height * start_subline_index as f32;
+            for subline_index in start_subline_index..=end_subline_index {
+                let x_start = if subline_index == start_subline_index {
+                    start_pos.x
+                } else {
+                    last_layout.line_number_width
+                };
+                let x_end = if subline_index == end_subline_index {
+                    end_pos.x
+                } else {
+                    last_layout.line_number_width + last_layout.content_width
+                };
+                let pill_origin = point(
+                    last_bounds.origin.x + x_start - badge.style.leading_padding,
+                    last_bounds.origin.y
+                        + line_origin_y
+                        + line_height * subline_index as f32
+                        + badge.style.vertical_inset,
+                );
+                let pill_size = gpui::size(
+                    (x_end - x_start + badge.style.leading_padding + badge.style.trailing_padding)
+                        .max(px(0.)),
+                    (line_height - badge.style.vertical_inset * 2.).max(px(0.)),
+                );
+                let pill_bounds = Bounds::new(pill_origin, pill_size);
+                if pill_bounds.contains(&position) {
+                    return Some(badge.id);
+                }
+            }
+        }
+
+        None
+    }
+
     pub(crate) fn range_to_bounds(&self, range: &Range<usize>) -> Option<Bounds<Pixels>> {
         let Some(last_layout) = self.last_layout.as_ref() else {
             return None;
@@ -2087,6 +2413,7 @@ impl EntityInputHandler for InputState {
                 self.range_from_utf16(&range)
             }))
             .unwrap_or(self.selected_range.into());
+        let range = self.normalize_inline_badge_edit_range(range);
 
         let old_text = self.text.clone();
         self.text.replace(range.clone(), new_text);
@@ -2109,6 +2436,10 @@ impl EntityInputHandler for InputState {
                 new_offset = (range.start + new_text_len).min(mask_text.len());
             }
         }
+
+        let delta = new_text.len() as isize - range.len() as isize;
+        self.remove_inline_badges_intersecting(&range);
+        self.shift_inline_badges_after(range.end, delta);
 
         self.push_history(&old_text, &range, &new_text);
         self.history.end_grouping();
@@ -2178,6 +2509,7 @@ impl EntityInputHandler for InputState {
                 self.range_from_utf16(&range)
             }))
             .unwrap_or(self.selected_range.into());
+        let range = self.normalize_inline_badge_edit_range(range);
 
         let old_text = self.text.clone();
         self.text.replace(range.clone(), new_text);
@@ -2214,6 +2546,9 @@ impl EntityInputHandler for InputState {
         self.mode.update_auto_grow(&self.text_wrapper);
         self.reset_scroll_if_text_empty();
         self.history.start_grouping();
+        let delta = new_text.len() as isize - range.len() as isize;
+        self.remove_inline_badges_intersecting(&range);
+        self.shift_inline_badges_after(range.end, delta);
         self.push_history(&old_text, &range, new_text);
         cx.notify();
     }

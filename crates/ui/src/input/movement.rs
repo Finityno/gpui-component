@@ -45,7 +45,7 @@ impl InputState {
         direction: Option<MoveDirection>,
         cx: &mut Context<Self>,
     ) {
-        let offset = offset.clamp(0, self.text.len());
+        let offset = self.snap_offset_outside_inline_badge(offset.clamp(0, self.text.len()));
         self.selected_range = (offset..offset).into();
         self.scroll_to(offset, direction, cx);
         self.pause_blink_cursor(cx);
