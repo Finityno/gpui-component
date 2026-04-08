@@ -762,11 +762,13 @@ impl TextElement {
 
             for range in &line_item.wrapped_lines {
                 let line_runs = runs_for_range(runs, offset, &range);
+                let wrapped_line_start =
+                    visible_range_offset.start + offset + range.start;
                 let line_runs = if bg_segments.is_empty() {
                     line_runs
                 } else {
                     split_runs_by_bg_segments(
-                        visible_range_offset.start + offset,
+                        wrapped_line_start,
                         &line_runs,
                         bg_segments,
                     )
@@ -775,7 +777,7 @@ impl TextElement {
                     line_runs
                 } else {
                     split_runs_by_inline_badges(
-                        visible_range_offset.start + offset,
+                        wrapped_line_start,
                         &line_runs,
                         &inline_badge_segments,
                     )
@@ -1937,5 +1939,28 @@ mod tests {
         assert_eq!(result[3].color, gpui::black());
         assert_eq!(result[4].color, gpui::black());
         assert_eq!(result[5].color, gpui::blue());
+    }
+
+    #[test]
+    fn test_split_runs_by_inline_badges_respects_wrapped_subline_start() {
+        let run = TextRun {
+            len: 0,
+            font: gpui::font(".SystemUIFont"),
+            color: gpui::black(),
+            background_color: None,
+            underline: None,
+            strikethrough: None,
+        };
+
+        let runs = vec![TextRun {
+            len: 6,
+            ..run.clone()
+        }];
+
+        let result = split_runs_by_inline_badges(12, &runs, &[(4..10, gpui::red())]);
+
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].len, 6);
+        assert_eq!(result[0].color, gpui::black());
     }
 }
