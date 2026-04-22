@@ -162,7 +162,7 @@ impl Element for Anchored {
             let mut anchor_corner = self.anchor_corner;
 
             if desired.left() < limits.left() || desired.right() > limits.right() {
-                let switched = Bounds::from_corner_and_size(
+                let switched = Bounds::from_anchor_and_size(
                     anchor_corner
                         .other_side_corner_along(Axis::Horizontal)
                         .into(),
@@ -176,7 +176,7 @@ impl Element for Anchored {
             }
 
             if desired.top() < limits.top() || desired.bottom() > limits.bottom() {
-                let switched = Bounds::from_corner_and_size(
+                let switched = Bounds::from_anchor_and_size(
                     anchor_corner.other_side_corner_along(Axis::Vertical).into(),
                     origin,
                     size,

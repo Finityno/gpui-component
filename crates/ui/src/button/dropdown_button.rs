@@ -1,10 +1,10 @@
 use gpui::{
-    App, Context, Corner, Corners, Edges, ElementId, InteractiveElement as _, IntoElement,
-    ParentElement, RenderOnce, StyleRefinement, Styled, Window, div, prelude::FluentBuilder,
+    App, Context, Corners, Edges, ElementId, InteractiveElement as _, IntoElement, ParentElement,
+    RenderOnce, StyleRefinement, Styled, Window, div, prelude::FluentBuilder,
 };
 
 use crate::{
-    Disableable, IconName, Selectable, Sizable, Size, StyledExt as _,
+    Anchor, Disableable, IconName, Selectable, Sizable, Size, StyledExt as _,
     menu::{DropdownMenu, PopupMenu},
 };
 
@@ -26,7 +26,7 @@ pub struct DropdownButton {
     variant: ButtonVariant,
     size: Size,
     rounded: ButtonRounded,
-    anchor: Corner,
+    anchor: Anchor,
 }
 
 impl DropdownButton {
@@ -45,7 +45,7 @@ impl DropdownButton {
             variant: ButtonVariant::default(),
             size: Size::default(),
             rounded: ButtonRounded::default(),
-            anchor: Corner::TopRight,
+            anchor: Anchor::TopRight,
         }
     }
 
@@ -67,7 +67,7 @@ impl DropdownButton {
     /// Set the dropdown menu of the button with anchor corner.
     pub fn dropdown_menu_with_anchor(
         mut self,
-        anchor: impl Into<Corner>,
+        anchor: impl Into<Anchor>,
         menu: impl Fn(PopupMenu, &mut Window, &mut Context<PopupMenu>) -> PopupMenu + 'static,
     ) -> Self {
         self.menu = Some(Box::new(menu));
@@ -207,7 +207,6 @@ impl RenderOnce for DropdownButton {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gpui::Corner;
 
     #[gpui::test]
     fn test_dropdown_button_builder(_cx: &mut gpui::TestAppContext) {
@@ -222,7 +221,7 @@ mod tests {
             .disabled(false)
             .selected(false)
             .rounded(ButtonRounded::Medium)
-            .dropdown_menu_with_anchor(Corner::BottomLeft, |menu, _, _| menu);
+            .dropdown_menu_with_anchor(Anchor::BottomLeft, |menu, _, _| menu);
 
         assert!(dropdown.button.is_some());
         assert_eq!(dropdown.variant, ButtonVariant::Primary);
@@ -234,6 +233,6 @@ mod tests {
         assert!(!dropdown.selected);
         assert!(matches!(dropdown.rounded, ButtonRounded::Medium));
         assert!(dropdown.menu.is_some());
-        assert_eq!(dropdown.anchor, Corner::BottomLeft);
+        assert_eq!(dropdown.anchor, Anchor::BottomLeft);
     }
 }

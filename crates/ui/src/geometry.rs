@@ -1,6 +1,6 @@
 use std::fmt::{self, Debug, Display, Formatter};
 
-use gpui::{AbsoluteLength, Axis, Corner, Length, Pixels};
+use gpui::{AbsoluteLength, Axis, Length, Pixels};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -167,26 +167,32 @@ impl Anchor {
     }
 }
 
-impl From<Corner> for Anchor {
-    fn from(corner: Corner) -> Self {
-        match corner {
-            Corner::TopLeft => Anchor::TopLeft,
-            Corner::TopRight => Anchor::TopRight,
-            Corner::BottomLeft => Anchor::BottomLeft,
-            Corner::BottomRight => Anchor::BottomRight,
+impl From<gpui::Anchor> for Anchor {
+    fn from(anchor: gpui::Anchor) -> Self {
+        match anchor {
+            gpui::Anchor::TopLeft => Anchor::TopLeft,
+            gpui::Anchor::TopRight => Anchor::TopRight,
+            gpui::Anchor::BottomLeft => Anchor::BottomLeft,
+            gpui::Anchor::BottomRight => Anchor::BottomRight,
+            gpui::Anchor::TopCenter => Anchor::TopCenter,
+            gpui::Anchor::BottomCenter => Anchor::BottomCenter,
+            // gpui::Anchor has LeftCenter/RightCenter that our Anchor lacks;
+            // map them to the nearest corner on the same side.
+            gpui::Anchor::LeftCenter => Anchor::TopLeft,
+            gpui::Anchor::RightCenter => Anchor::TopRight,
         }
     }
 }
 
-impl From<Anchor> for Corner {
+impl From<Anchor> for gpui::Anchor {
     fn from(anchor: Anchor) -> Self {
         match anchor {
-            Anchor::TopLeft => Corner::TopLeft,
-            Anchor::TopRight => Corner::TopRight,
-            Anchor::BottomLeft => Corner::BottomLeft,
-            Anchor::BottomRight => Corner::BottomRight,
-            Anchor::TopCenter => Corner::TopLeft,
-            Anchor::BottomCenter => Corner::BottomLeft,
+            Anchor::TopLeft => gpui::Anchor::TopLeft,
+            Anchor::TopRight => gpui::Anchor::TopRight,
+            Anchor::BottomLeft => gpui::Anchor::BottomLeft,
+            Anchor::BottomRight => gpui::Anchor::BottomRight,
+            Anchor::TopCenter => gpui::Anchor::TopCenter,
+            Anchor::BottomCenter => gpui::Anchor::BottomCenter,
         }
     }
 }
@@ -526,48 +532,45 @@ mod tests {
     }
 
     #[test]
-    fn test_anchor_from_corner() {
+    fn test_anchor_from_gpui_anchor() {
         use super::Anchor;
-        use gpui::Corner;
 
-        // Test From<Corner> for Anchor
-        assert_eq!(Anchor::from(Corner::TopLeft), Anchor::TopLeft);
-        assert_eq!(Anchor::from(Corner::TopRight), Anchor::TopRight);
-        assert_eq!(Anchor::from(Corner::BottomLeft), Anchor::BottomLeft);
-        assert_eq!(Anchor::from(Corner::BottomRight), Anchor::BottomRight);
-
-        // Test using into()
-        let anchor: Anchor = Corner::TopLeft.into();
-        assert_eq!(anchor, Anchor::TopLeft);
-
-        let anchor: Anchor = Corner::BottomRight.into();
-        assert_eq!(anchor, Anchor::BottomRight);
+        assert_eq!(Anchor::from(gpui::Anchor::TopLeft), Anchor::TopLeft);
+        assert_eq!(Anchor::from(gpui::Anchor::TopRight), Anchor::TopRight);
+        assert_eq!(Anchor::from(gpui::Anchor::BottomLeft), Anchor::BottomLeft);
+        assert_eq!(Anchor::from(gpui::Anchor::BottomRight), Anchor::BottomRight);
+        assert_eq!(Anchor::from(gpui::Anchor::TopCenter), Anchor::TopCenter);
+        assert_eq!(
+            Anchor::from(gpui::Anchor::BottomCenter),
+            Anchor::BottomCenter
+        );
+        // LeftCenter/RightCenter fold to the nearest top corner.
+        assert_eq!(Anchor::from(gpui::Anchor::LeftCenter), Anchor::TopLeft);
+        assert_eq!(Anchor::from(gpui::Anchor::RightCenter), Anchor::TopRight);
     }
 
     #[test]
-    fn test_anchor_to_corner() {
+    fn test_anchor_to_gpui_anchor() {
         use super::Anchor;
-        use gpui::Corner;
 
-        // Test From<Anchor> for Corner (i.e., Into<Corner>)
-        assert_eq!(Corner::from(Anchor::TopLeft), Corner::TopLeft);
-        assert_eq!(Corner::from(Anchor::TopRight), Corner::TopRight);
-        assert_eq!(Corner::from(Anchor::BottomLeft), Corner::BottomLeft);
-        assert_eq!(Corner::from(Anchor::BottomRight), Corner::BottomRight);
-
-        // Test center anchors map to their respective corners
-        assert_eq!(Corner::from(Anchor::TopCenter), Corner::TopLeft);
-        assert_eq!(Corner::from(Anchor::BottomCenter), Corner::BottomLeft);
-
-        // Test using into()
-        let corner: Corner = Anchor::TopLeft.into();
-        assert_eq!(corner, Corner::TopLeft);
-
-        let corner: Corner = Anchor::TopCenter.into();
-        assert_eq!(corner, Corner::TopLeft);
-
-        let corner: Corner = Anchor::BottomRight.into();
-        assert_eq!(corner, Corner::BottomRight);
+        assert_eq!(gpui::Anchor::from(Anchor::TopLeft), gpui::Anchor::TopLeft);
+        assert_eq!(gpui::Anchor::from(Anchor::TopRight), gpui::Anchor::TopRight);
+        assert_eq!(
+            gpui::Anchor::from(Anchor::BottomLeft),
+            gpui::Anchor::BottomLeft
+        );
+        assert_eq!(
+            gpui::Anchor::from(Anchor::BottomRight),
+            gpui::Anchor::BottomRight
+        );
+        assert_eq!(
+            gpui::Anchor::from(Anchor::TopCenter),
+            gpui::Anchor::TopCenter
+        );
+        assert_eq!(
+            gpui::Anchor::from(Anchor::BottomCenter),
+            gpui::Anchor::BottomCenter
+        );
     }
 
     #[test]
