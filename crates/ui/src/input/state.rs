@@ -121,6 +121,8 @@ pub struct InlineBadgeStyle {
     pub corner_radius: Pixels,
     pub icon_size: Pixels,
     pub icon_left_inset: Pixels,
+    /// Extra downward offset applied after the icon is vertically centered
+    /// within the badge. Positive values nudge the icon toward the baseline.
     pub icon_top_inset: Pixels,
 }
 
@@ -136,7 +138,7 @@ impl InlineBadgeStyle {
             corner_radius: px(2.),
             icon_size: px(12.),
             icon_left_inset: px(4.),
-            icon_top_inset: px(5.),
+            icon_top_inset: px(0.),
         }
     }
 
@@ -172,6 +174,11 @@ impl InlineBadgeStyle {
 
     pub fn icon_left_inset(mut self, icon_left_inset: Pixels) -> Self {
         self.icon_left_inset = icon_left_inset;
+        self
+    }
+
+    pub fn icon_top_inset(mut self, icon_top_inset: Pixels) -> Self {
+        self.icon_top_inset = icon_top_inset;
         self
     }
 }

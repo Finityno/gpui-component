@@ -1490,15 +1490,17 @@ impl Element for TextElement {
                                     line_height - badge.style.vertical_inset * 2.,
                                 );
                                 let pill_bounds = Bounds::new(pill_origin, pill_size);
-                                window.paint_quad(quad(
-                                    pill_bounds,
-                                    Corners::all(badge.style.corner_radius)
-                                        .clamp_radii_for_quad_size(pill_size),
-                                    badge.style.background_color,
-                                    Edges::default(),
-                                    gpui::transparent_black(),
-                                    BorderStyle::default(),
-                                ));
+                                if badge.style.background_color.a > 0. {
+                                    window.paint_quad(quad(
+                                        pill_bounds,
+                                        Corners::all(badge.style.corner_radius)
+                                            .clamp_radii_for_quad_size(pill_size),
+                                        badge.style.background_color,
+                                        Edges::default(),
+                                        gpui::transparent_black(),
+                                        BorderStyle::default(),
+                                    ));
+                                }
 
                                 if visual_line == start_visual_line
                                     && let Some(icon_path) = badge.style.icon_path.clone()
@@ -1508,7 +1510,8 @@ impl Element for TextElement {
                                             p.x + x_start + badge.style.icon_left_inset,
                                             pill_bounds.origin.y
                                                 + (pill_bounds.size.height - badge.style.icon_size)
-                                                    / 2.,
+                                                    / 2.
+                                                + badge.style.icon_top_inset,
                                         ),
                                         size(badge.style.icon_size, badge.style.icon_size),
                                     );
