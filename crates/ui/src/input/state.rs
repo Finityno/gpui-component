@@ -418,6 +418,9 @@ pub struct InputState {
     /// The mask pattern for formatting the input text
     pub(crate) mask_pattern: MaskPattern,
     pub(super) placeholder: SharedString,
+    /// Color to paint the placeholder in, when the caller wants something other
+    /// than the theme's `muted_foreground`.
+    pub(super) placeholder_color: Option<Hsla>,
 
     /// Popover
     diagnostic_popover: Option<Entity<DiagnosticPopover>>,
@@ -514,6 +517,7 @@ impl InputState {
             deferred_scroll_offset: None,
             preferred_column: None,
             placeholder: SharedString::default(),
+            placeholder_color: None,
             mask_pattern: MaskPattern::default(),
             text_align: TextAlign::Left,
             lsp: Lsp::default(),
@@ -585,6 +589,13 @@ impl InputState {
     /// Set placeholder
     pub fn placeholder(mut self, placeholder: impl Into<SharedString>) -> Self {
         self.placeholder = placeholder.into();
+        self
+    }
+
+    /// Set the color used to paint the placeholder, overriding the theme's
+    /// `muted_foreground`.
+    pub fn placeholder_color(mut self, color: impl Into<Hsla>) -> Self {
+        self.placeholder_color = Some(color.into());
         self
     }
 
@@ -676,6 +687,16 @@ impl InputState {
         cx: &mut Context<Self>,
     ) {
         self.placeholder = placeholder.into();
+        cx.notify();
+    }
+
+    /// Set the color used to paint the placeholder, overriding the theme's
+    /// `muted_foreground`. `None` restores the theme color.
+    pub fn set_placeholder_color(&mut self, color: Option<Hsla>, cx: &mut Context<Self>) {
+        if self.placeholder_color == color {
+            return;
+        }
+        self.placeholder_color = color;
         cx.notify();
     }
 

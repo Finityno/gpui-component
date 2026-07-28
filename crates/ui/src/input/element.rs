@@ -994,7 +994,9 @@ impl Element for TextElement {
         let (display_text, text_color) = if is_empty {
             (
                 &Rope::from(placeholder.as_str()),
-                cx.theme().muted_foreground,
+                state
+                    .placeholder_color
+                    .unwrap_or_else(|| cx.theme().muted_foreground),
             )
         } else if state.masked {
             (
