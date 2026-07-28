@@ -1053,51 +1053,38 @@ impl Element for TextElement {
             strikethrough: None,
         };
 
-        let runs = if !is_empty {
-            if let Some(highlight_styles) = highlight_styles {
-                let mut runs = vec![];
+        // The composition underline is applied by splitting whatever runs the
+        // text already has at the marked range's edges. Keying off the marked
+        // range alone (rather than off "the input is empty") is what makes the
+        // underline show up in an input that already has text, and splitting on
+        // intersection rather than containment is what keeps it whole when the
+        // composition crosses a syntax-highlight boundary.
+        let ime_marked_range = state
+            .ime_marked_range
+            .as_ref()
+            .map(|marked| marked.start..marked.end);
+        let runs = if let (false, Some(highlight_styles)) = (is_empty, highlight_styles) {
+            let mut runs = Vec::with_capacity(highlight_styles.len() + 2);
 
-                runs.extend(highlight_styles.iter().map(|(range, style)| {
-                    let mut run = text_style.clone().highlight(*style).to_run(range.len());
-                    if let Some(ime_marked_range) = &state.ime_marked_range {
-                        if range.start >= ime_marked_range.start
-                            && range.end <= ime_marked_range.end
-                        {
-                            run.color = marked_run.color;
-                            run.strikethrough = marked_run.strikethrough;
-                            run.underline = marked_run.underline;
-                        }
-                    }
-
-                    run
-                }));
-
-                runs.into_iter().filter(|run| run.len > 0).collect()
-            } else {
-                vec![run]
+            for (range, style) in &highlight_styles {
+                let run = text_style.clone().highlight(*style).to_run(range.len());
+                runs.extend(split_run_for_ime_underline(
+                    run,
+                    range.clone(),
+                    ime_marked_range.clone(),
+                    marked_run.underline,
+                ));
             }
-        } else if let Some(ime_marked_range) = &state.ime_marked_range {
-            // IME marked text
-            vec![
-                TextRun {
-                    len: ime_marked_range.start,
-                    ..run.clone()
-                },
-                TextRun {
-                    len: ime_marked_range.end - ime_marked_range.start,
-                    underline: marked_run.underline,
-                    ..run.clone()
-                },
-                TextRun {
-                    len: display_text.len() - ime_marked_range.end,
-                    ..run.clone()
-                },
-            ]
-            .into_iter()
-            .filter(|run| run.len > 0)
-            .collect()
+
+            runs
         } else {
-            vec![run]
+            split_run_for_ime_underline(
+                run,
+                0..display_text.len(),
+                ime_marked_range,
+                marked_run.underline,
+            )
+            .into_vec()
         };
 
         let document_colors = state
@@ -1726,6 +1713,53 @@ pub(super) fn runs_for_range(
     }
 
     result
+}
+
+/// Split `run` so the part of it covered by the IME composition carries the
+/// composition underline, leaving the rest untouched.
+///
+/// `run_range` is `run`'s own byte range in the same coordinate space as
+/// `marked_range`. The split is on the intersection, so a composition that only
+/// partly overlaps a syntax-highlight run still underlines the overlap instead
+/// of dropping the underline entirely.
+fn split_run_for_ime_underline(
+    run: TextRun,
+    run_range: Range<usize>,
+    marked_range: Option<Range<usize>>,
+    marked_underline: Option<UnderlineStyle>,
+) -> SmallVec<[TextRun; 3]> {
+    if run.len == 0 {
+        return SmallVec::new();
+    }
+
+    let Some(marked) = marked_range else {
+        return [run].into_iter().collect();
+    };
+
+    let intersection_start = run_range.start.max(marked.start);
+    let intersection_end = run_range.end.min(marked.end);
+    if intersection_start >= intersection_end {
+        return [run].into_iter().collect();
+    }
+
+    [
+        TextRun {
+            len: intersection_start - run_range.start,
+            ..run.clone()
+        },
+        TextRun {
+            len: intersection_end - intersection_start,
+            underline: marked_underline,
+            ..run.clone()
+        },
+        TextRun {
+            len: run_range.end - intersection_end,
+            ..run
+        },
+    ]
+    .into_iter()
+    .filter(|run| run.len > 0)
+    .collect()
 }
 
 fn split_runs_by_bg_segments(
