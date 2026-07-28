@@ -443,7 +443,14 @@ impl Render for Root {
                 .relative()
                 .size_full()
                 .font_family(cx.theme().font_family.clone())
-                .bg(cx.theme().background)
+                // In transparent-window-root mode the embedding application
+                // paints its own (translucent) surfaces over a system glass
+                // window background; an opaque fill here would hide it.
+                .bg(if cx.theme().transparent_window_root {
+                    cx.theme().transparent
+                } else {
+                    cx.theme().background
+                })
                 .text_color(cx.theme().foreground)
                 .refine_style(&self.style)
                 .child(self.view.clone()),

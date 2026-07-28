@@ -82,6 +82,10 @@ pub struct Theme {
     pub list: ListSettings,
     /// The sheet settings.
     pub sheet: SheetSettings,
+    /// When true, `Root` paints a transparent window background instead of
+    /// `background`, so a system glass window effect can show through
+    /// translucent surfaces painted by the embedding application.
+    pub transparent_window_root: bool,
 }
 
 impl Default for Theme {
@@ -218,6 +222,7 @@ impl From<&ThemeColor> for Theme {
             dark_theme: Rc::new(ThemeConfig::default()),
             highlight_theme: HighlightTheme::default_light(),
             sheet: SheetSettings::default(),
+            transparent_window_root: false,
         }
     }
 }
