@@ -175,6 +175,13 @@ impl TextElement {
             (cursor_pos, cursor_start, cursor_end)
         {
             let selection_changed = state.last_selected_range != Some(selected_range);
+            // While a drag selection is autoscrolling, that loop owns the
+            // vertical offset. The tracking below moves in whole `line_height`
+            // steps once per frame, so leaving it on during a drag makes the
+            // viewport lurch a line at a time on top of the smooth scroll. Only
+            // the vertical half stands down — a diagonal drag still has to keep
+            // the cursor's column in view.
+            let track_selection_y = !state.selection_autoscrolling;
             if selection_changed && !is_selected_all {
                 // Apart from left alignment, just leave enough space for the cursor size on the right side.
                 let safety_margin = if last_layout.text_align == TextAlign::Left {
@@ -197,8 +204,10 @@ impl TextElement {
 
                 // If we change the scroll_offset.y, GPUI will render and trigger the next run loop.
                 // So, here we just adjust offset by `line_height` for move smooth.
-                scroll_offset.y =
-                    if scroll_offset.y + cursor_pos.y > bounds.size.height - top_bottom_margin {
+                if track_selection_y {
+                    scroll_offset.y = if scroll_offset.y + cursor_pos.y
+                        > bounds.size.height - top_bottom_margin
+                    {
                         // cursor is out of bottom
                         scroll_offset.y - line_height
                     } else if scroll_offset.y + cursor_pos.y < top_bottom_margin {
@@ -207,6 +216,7 @@ impl TextElement {
                     } else {
                         scroll_offset.y
                     };
+                }
 
                 // For selection to move scroll
                 if state.selection_reversed {
@@ -214,7 +224,7 @@ impl TextElement {
                         // selection start is out of left
                         scroll_offset.x = -cursor_start.x;
                     }
-                    if scroll_offset.y + cursor_start.y < px(0.) {
+                    if track_selection_y && scroll_offset.y + cursor_start.y < px(0.) {
                         // selection start is out of top
                         scroll_offset.y = -cursor_start.y;
                     }
@@ -225,7 +235,7 @@ impl TextElement {
                         // selection end is out of left
                         scroll_offset.x = -cursor_end.x;
                     }
-                    if scroll_offset.y + cursor_end.y <= px(0.) {
+                    if track_selection_y && scroll_offset.y + cursor_end.y <= px(0.) {
                         // selection end is out of top
                         scroll_offset.y = -cursor_end.y;
                     }
