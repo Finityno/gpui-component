@@ -358,6 +358,17 @@ impl RenderOnce for Input {
                 MouseButton::Right,
                 window.listener_for(&self.state, InputState::on_mouse_up),
             )
+            // A drag selection can be released anywhere — the autoscroll it may
+            // have started has to end with it, not run on until the pointer
+            // happens to come back over the input.
+            .on_mouse_up_out(
+                MouseButton::Left,
+                window.listener_for(&self.state, InputState::on_mouse_up),
+            )
+            .on_mouse_up_out(
+                MouseButton::Right,
+                window.listener_for(&self.state, InputState::on_mouse_up),
+            )
             .on_mouse_move(window.listener_for(&self.state, InputState::on_mouse_move))
             .on_scroll_wheel(window.listener_for(&self.state, InputState::on_scroll_wheel))
             .size_full()

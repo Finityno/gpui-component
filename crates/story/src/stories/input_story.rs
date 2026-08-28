@@ -98,7 +98,6 @@ impl InputStory {
             InputState::new(window, cx)
                 .code_editor("json")
                 .multi_line(false)
-                .show_whitespaces(true)
                 .default_value(CODE_EXAMPLE)
         });
 
@@ -169,6 +168,7 @@ impl InputStory {
             InputEvent::PressEnter { secondary } => println!("PressEnter secondary: {}", secondary),
             InputEvent::Focus => println!("Focus"),
             InputEvent::Blur => println!("Blur"),
+            InputEvent::InlineBadgeClick { .. } | InputEvent::PasteImages { .. } => {}
         };
     }
 

@@ -1,5 +1,5 @@
 use gpui::{
-    App, AppContext, Context, Corner, Div, ElementId, Entity, EventEmitter, FocusHandle, Focusable,
+    App, AppContext, Context, Div, ElementId, Entity, EventEmitter, FocusHandle, Focusable,
     Hsla, InteractiveElement as _, IntoElement, KeyBinding, ParentElement, Render, RenderOnce,
     SharedString, Stateful, StatefulInteractiveElement as _, StyleRefinement, Styled, Subscription,
     TextAlign, Window, div, hsla, linear_color_stop, linear_gradient, prelude::FluentBuilder as _,
@@ -7,7 +7,7 @@ use gpui::{
 use rust_i18n::t;
 
 use crate::{
-    ActiveTheme as _, Colorize as _, Icon, Sizable, Size, StyleSized,
+    ActiveTheme as _, Anchor, Colorize as _, Icon, Sizable, Size, StyleSized,
     actions::Confirm,
     button::{Button, ButtonVariants},
     divider::Divider,
@@ -324,7 +324,7 @@ pub struct ColorPicker {
     label: Option<SharedString>,
     icon: Option<Icon>,
     size: Size,
-    anchor: Corner,
+    anchor: Anchor,
 }
 
 impl ColorPicker {
@@ -338,7 +338,7 @@ impl ColorPicker {
             size: Size::Medium,
             label: None,
             icon: None,
-            anchor: Corner::TopLeft,
+            anchor: Anchor::TopLeft,
         }
     }
 
@@ -370,8 +370,8 @@ impl ColorPicker {
 
     /// Set the anchor corner of the color picker.
     ///
-    /// Default is `Corner::TopLeft`.
-    pub fn anchor(mut self, anchor: Corner) -> Self {
+    /// Default is `Anchor::TopLeft`.
+    pub fn anchor(mut self, anchor: Anchor) -> Self {
         self.anchor = anchor;
         self
     }
@@ -400,7 +400,7 @@ impl ColorPicker {
                 .active(|this| this.border_color(color.darken(0.5)).bg(color.darken(0.2)))
                 .on_mouse_move(window.listener_for(&state, move |state, _, window, cx| {
                     state.hovered_color = Some(color);
-                    state.state.update(cx, |input, cx| {
+                    state.state.update(cx, |input: &mut InputState, cx| {
                         input.set_value(color.to_hex(), window, cx);
                     });
                     cx.notify();
@@ -457,7 +457,7 @@ impl ColorPicker {
                     .render_slider_tab_panel(slider_color, cx)
                     .into_any_element(),
             })
-            .when_some(hovered_color, |this, hovered_color| {
+            .when_some(hovered_color, |this, hovered_color: Hsla| {
                 this.child(Divider::horizontal()).child(
                     h_flex()
                         .gap_2()
@@ -732,7 +732,7 @@ impl Styled for ColorPicker {
 
 impl RenderOnce for ColorPicker {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
-        let state = self.state.read(cx);
+        let state: &ColorPickerState = self.state.read(cx);
         let display_title: SharedString = if let Some(value) = state.value {
             value.to_hex()
         } else {
@@ -761,7 +761,7 @@ impl RenderOnce for ColorPicker {
                         Button::new("trigger")
                             .with_size(self.size)
                             .text()
-                            .when_some(self.icon.clone(), |this, icon| this.icon(icon.clone()))
+                            .when_some(self.icon.clone(), |this, icon: Icon| this.icon(icon.clone()))
                             .when_none(&self.icon, |this| {
                                 this.p_0().child(
                                     div()
@@ -775,7 +775,7 @@ impl RenderOnce for ColorPicker {
                                         .rounded(cx.theme().radius)
                                         .overflow_hidden()
                                         .size_with(self.size)
-                                        .when_some(state.value, |this, value| {
+                                        .when_some(state.value, |this, value: Hsla| {
                                             this.bg(value)
                                                 .border_color(value.darken(0.3))
                                                 .when(state.open, |this| this.border_2())

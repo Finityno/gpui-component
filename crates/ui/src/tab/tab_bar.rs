@@ -1,5 +1,5 @@
 use gpui::{
-    AnyElement, App, Corner, Div, Edges, ElementId, InteractiveElement, IntoElement, ParentElement,
+    AnyElement, App, Div, Edges, ElementId, InteractiveElement, IntoElement, ParentElement,
     RenderOnce, ScrollHandle, Stateful, StatefulInteractiveElement as _, StyleRefinement, Styled,
     Window, div, prelude::FluentBuilder as _, px,
 };
@@ -9,7 +9,7 @@ use std::rc::Rc;
 use super::{Tab, TabVariant};
 use crate::button::{Button, ButtonVariants as _};
 use crate::menu::{DropdownMenu as _, PopupMenuItem};
-use crate::{ActiveTheme, IconName, Selectable, Sizable, Size, StyledExt, h_flex};
+use crate::{ActiveTheme, Anchor, IconName, Selectable, Sizable, Size, StyledExt, h_flex};
 
 /// A TabBar element that contains multiple [`Tab`] items.
 #[derive(IntoElement)]
@@ -278,7 +278,7 @@ impl RenderOnce for TabBar {
 
                             this
                         })
-                        .anchor(Corner::TopRight),
+                        .anchor(Anchor::TopRight),
                 )
             })
             .when_some(self.suffix, |this, suffix| this.child(suffix))

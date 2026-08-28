@@ -8,14 +8,15 @@ use gpui::{
     EventEmitter, FocusHandle, Focusable, Hsla, InteractiveElement as _, IntoElement, KeyBinding,
     KeyDownEvent, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement as _,
     Pixels, Point, Render, ScrollHandle, ScrollWheelEvent, ShapedLine, SharedString, Styled as _,
-    Subscription, Task, UTF16Selection, Window, actions, div, point, prelude::FluentBuilder as _,
-    px,
+    Subscription, Task, TouchPhase, UTF16Selection, Window, actions, div, point,
+    prelude::FluentBuilder as _, px,
 };
 use gpui::{Half, TextAlign};
 use ropey::{Rope, RopeSlice};
 use serde::Deserialize;
 use std::ops::Range;
 use std::rc::Rc;
+use std::time::{Duration, Instant};
 use sum_tree::Bias;
 use unicode_segmentation::*;
 
@@ -121,6 +122,8 @@ pub struct InlineBadgeStyle {
     pub corner_radius: Pixels,
     pub icon_size: Pixels,
     pub icon_left_inset: Pixels,
+    /// Extra downward offset applied after the icon is vertically centered
+    /// within the badge. Positive values nudge the icon toward the baseline.
     pub icon_top_inset: Pixels,
 }
 
@@ -136,7 +139,7 @@ impl InlineBadgeStyle {
             corner_radius: px(2.),
             icon_size: px(12.),
             icon_left_inset: px(4.),
-            icon_top_inset: px(5.),
+            icon_top_inset: px(0.),
         }
     }
 
@@ -172,6 +175,11 @@ impl InlineBadgeStyle {
 
     pub fn icon_left_inset(mut self, icon_left_inset: Pixels) -> Self {
         self.icon_left_inset = icon_left_inset;
+        self
+    }
+
+    pub fn icon_top_inset(mut self, icon_top_inset: Pixels) -> Self {
+        self.icon_top_inset = icon_top_inset;
         self
     }
 }
@@ -365,6 +373,150 @@ impl LastLayout {
     }
 }
 
+/// A wheel gesture that goes this long without an event is treated as finished.
+///
+/// Only a fallback for wheels that report no [`TouchPhase`]; trackpads delimit
+/// their gestures exactly. Long enough to span the gap between mouse-wheel
+/// notches during a continuous spin, short enough that a deliberate second flick
+/// counts as a new gesture.
+const SCROLL_CHAIN_GESTURE_SEPARATION: Duration = Duration::from_millis(250);
+
+/// How far a gesture that has already scrolled this input must keep pushing past
+/// the bound before the scroll is handed to whatever is behind the input.
+///
+/// Scrolling up and down inside a draft to re-read it never travels this far
+/// beyond the end in one gesture, so the surface behind stays put; a deliberate
+/// shove still gets through without waiting for the gesture to end.
+const SCROLL_CHAIN_RELEASE_DISTANCE: Pixels = px(180.);
+
+/// Cadence of the drag-selection autoscroll: one tick per 60Hz frame.
+const SELECTION_AUTOSCROLL_INTERVAL: Duration = Duration::from_millis(16);
+
+/// How far inside each edge the drag autoscroll engages, as a fraction of a line.
+/// Starting just inside means a drag that stops exactly at the edge still travels.
+const SELECTION_AUTOSCROLL_EDGE_MARGIN: f32 = 0.5;
+
+/// Scroll distance per tick right at the edge, as a fraction of a line.
+const SELECTION_AUTOSCROLL_BASE_SPEED: f32 = 0.3;
+
+/// Added scroll distance per tick, per pixel the pointer sits beyond the edge.
+const SELECTION_AUTOSCROLL_OVERSHOOT_GAIN: f32 = 0.06;
+
+/// Ceiling on the per-tick scroll distance, as a fraction of a line. At 60Hz this
+/// is the fastest a held drag can travel, however far outside the input it goes.
+const SELECTION_AUTOSCROLL_MAX_SPEED: f32 = 1.2;
+
+/// Tracks one wheel gesture so the input can hold on to it for a moment after its
+/// own content runs out, instead of handing the very next event to the surface
+/// behind it.
+#[derive(Debug, Default)]
+struct ScrollChainLatch {
+    /// When the last wheel event of the current gesture arrived.
+    last_event_at: Option<Instant>,
+    /// The gesture has scrolled this input at least once, so the input owns it.
+    owns_gesture: bool,
+    /// The fingers have left the trackpad and what arrives now is momentum.
+    coasting: bool,
+    /// Distance pushed past the bound since the input last actually moved.
+    overscroll: Pixels,
+}
+
+/// Whether the input keeps a wheel event to itself rather than letting it reach
+/// whatever is behind it.
+///
+/// A gesture that never moved this input (it began at the bound, or the content
+/// fits) chains straight away, so the surface behind stays reachable with a fresh
+/// flick. A gesture that *did* move it keeps every event that follows until the
+/// user has pushed [`SCROLL_CHAIN_RELEASE_DISTANCE`] past the end — and keeps its
+/// momentum tail unconditionally, since coasting is not asking for more.
+fn scroll_chain_consumes_event(
+    latch: &mut ScrollChainLatch,
+    now: Instant,
+    touch_phase: TouchPhase,
+    delta: Point<Pixels>,
+    scrolled: bool,
+) -> bool {
+    if touch_phase == TouchPhase::Cancelled {
+        *latch = ScrollChainLatch::default();
+        return scrolled;
+    }
+
+    let starts_new_gesture = touch_phase == TouchPhase::Started
+        || latch.last_event_at.is_none_or(|last_event| {
+            now.duration_since(last_event) >= SCROLL_CHAIN_GESTURE_SEPARATION
+        });
+    if starts_new_gesture {
+        latch.owns_gesture = false;
+        latch.coasting = false;
+        latch.overscroll = px(0.);
+    }
+    // The fingers lifting does not end the gesture: a trackpad keeps sending
+    // momentum behind it as `TouchPhase::Moved`, and that tail is still the same
+    // flick. What it does mark is that nothing arriving now is the user pushing.
+    // A genuinely new gesture announces itself as `Started`, and the idle gap
+    // covers wheels that report no phase at all.
+    latch.coasting |= touch_phase == TouchPhase::Ended;
+    latch.last_event_at = Some(now);
+
+    if scrolled {
+        latch.owns_gesture = true;
+        latch.overscroll = px(0.);
+        return true;
+    }
+
+    if !latch.owns_gesture {
+        return false;
+    }
+
+    if latch.coasting {
+        // Momentum is the gesture finishing, not the user asking for more, so it
+        // never spends the grace: a hard flick that runs out of text simply
+        // stops instead of throwing the surface behind it.
+        return true;
+    }
+
+    latch.overscroll += delta.x.abs().max(delta.y.abs());
+    if latch.overscroll >= SCROLL_CHAIN_RELEASE_DISTANCE {
+        // Released for the rest of the gesture: re-latching mid-push would make
+        // the hand-off stutter between the two surfaces.
+        latch.owns_gesture = false;
+        return false;
+    }
+
+    true
+}
+
+/// Scroll offset change for one drag-selection autoscroll tick, or `None` when
+/// the pointer is inside the input and nothing should move.
+///
+/// The sign matches the scroll offset: positive moves the content down (toward
+/// the start of the text), which is what dragging above the input asks for.
+fn selection_autoscroll_delta(
+    pointer_y: Pixels,
+    bounds: Bounds<Pixels>,
+    line_height: Pixels,
+) -> Option<Pixels> {
+    if line_height <= px(0.) || bounds.size.height <= px(0.) {
+        return None;
+    }
+
+    let margin = (line_height * SELECTION_AUTOSCROLL_EDGE_MARGIN).min(bounds.size.height / 4.);
+    let above = (bounds.top() + margin) - pointer_y;
+    let below = pointer_y - (bounds.bottom() - margin);
+    let overshoot = above.max(below);
+    if overshoot <= px(0.) {
+        return None;
+    }
+
+    // Ramp with distance so a drag just past the edge creeps and one thrown well
+    // outside the input travels, the way a terminal or editor selection does.
+    let speed = (line_height * SELECTION_AUTOSCROLL_BASE_SPEED
+        + overshoot * SELECTION_AUTOSCROLL_OVERSHOOT_GAIN)
+        .min(line_height * SELECTION_AUTOSCROLL_MAX_SPEED);
+
+    Some(if above >= below { speed } else { -speed })
+}
+
 /// InputState to keep editing state of the [`super::Input`].
 pub struct InputState {
     pub(super) focus_handle: FocusHandle,
@@ -406,11 +558,24 @@ pub struct InputState {
     pub(crate) deferred_scroll_offset: Option<Point<Pixels>>,
     /// The size of the scrollable content.
     pub(crate) scroll_size: gpui::Size<Pixels>,
+    /// Decides when a wheel event that this input cannot use any more is handed
+    /// to the surface behind it.
+    scroll_chain: ScrollChainLatch,
+    /// Window position of the pointer during an in-flight drag selection.
+    selection_drag_position: Option<Point<Pixels>>,
+    /// Whether a drag selection is currently scrolling the viewport itself. The
+    /// element reads this to stay out of the way: its own selection tracking
+    /// steps a whole line per frame, which fights a smooth autoscroll.
+    pub(super) selection_autoscrolling: bool,
+    _selection_autoscroll_task: Option<Task<()>>,
     pub(super) text_align: TextAlign,
 
     /// The mask pattern for formatting the input text
     pub(crate) mask_pattern: MaskPattern,
     pub(super) placeholder: SharedString,
+    /// Color to paint the placeholder in, when the caller wants something other
+    /// than the theme's `muted_foreground`.
+    pub(super) placeholder_color: Option<Hsla>,
 
     /// Popover
     diagnostic_popover: Option<Entity<DiagnosticPopover>>,
@@ -505,8 +670,13 @@ impl InputState {
             scroll_handle: ScrollHandle::new(),
             scroll_size: gpui::size(px(0.), px(0.)),
             deferred_scroll_offset: None,
+            scroll_chain: ScrollChainLatch::default(),
+            selection_drag_position: None,
+            selection_autoscrolling: false,
+            _selection_autoscroll_task: None,
             preferred_column: None,
             placeholder: SharedString::default(),
+            placeholder_color: None,
             mask_pattern: MaskPattern::default(),
             text_align: TextAlign::Left,
             lsp: Lsp::default(),
@@ -578,6 +748,13 @@ impl InputState {
     /// Set placeholder
     pub fn placeholder(mut self, placeholder: impl Into<SharedString>) -> Self {
         self.placeholder = placeholder.into();
+        self
+    }
+
+    /// Set the color used to paint the placeholder, overriding the theme's
+    /// `muted_foreground`.
+    pub fn placeholder_color(mut self, color: impl Into<Hsla>) -> Self {
+        self.placeholder_color = Some(color.into());
         self
     }
 
@@ -669,6 +846,16 @@ impl InputState {
         cx: &mut Context<Self>,
     ) {
         self.placeholder = placeholder.into();
+        cx.notify();
+    }
+
+    /// Set the color used to paint the placeholder, overriding the theme's
+    /// `muted_foreground`. `None` restores the theme color.
+    pub fn set_placeholder_color(&mut self, color: Option<Hsla>, cx: &mut Context<Self>) {
+        if self.placeholder_color == color {
+            return;
+        }
+        self.placeholder_color = color;
         cx.notify();
     }
 
@@ -1431,11 +1618,12 @@ impl InputState {
         }
 
         self.selecting = true;
+        self.selection_drag_position = Some(event.position);
 
         if event.button == MouseButton::Left
             && let Some(id) = self.inline_badge_id_for_mouse_position(event.position)
         {
-            self.selecting = false;
+            self.end_selection_drag();
             cx.emit(InputEvent::InlineBadgeClick { id });
             return;
         }
@@ -1480,7 +1668,7 @@ impl InputState {
         if self.selected_range.is_empty() {
             self.selection_reversed = false;
         }
-        self.selecting = false;
+        self.end_selection_drag();
         self.selected_word_range = None;
     }
 
@@ -1537,9 +1725,19 @@ impl InputState {
 
         let old_offset = self.scroll_handle.offset();
         self.update_scroll_offset(Some(old_offset + delta), cx);
+        let scrolled = self.scroll_handle.offset() != old_offset;
 
-        // Only stop propagation if the offset actually changed
-        if self.scroll_handle.offset() != old_offset {
+        // Reaching the end of the text is not on its own a reason to let the
+        // scroll through: a gesture that has been moving this input keeps it for
+        // a while longer, so re-reading a long draft never jolts whatever the
+        // input floats over.
+        if scroll_chain_consumes_event(
+            &mut self.scroll_chain,
+            Instant::now(),
+            event.touch_phase,
+            delta,
+            scrolled,
+        ) {
             cx.stop_propagation();
         }
 
@@ -2142,8 +2340,120 @@ impl InputState {
             return;
         }
 
-        let offset = self.index_for_mouse_position(event.position);
+        self.selection_drag_position = Some(event.position);
+        self.update_selection_autoscroll(cx);
+
+        let offset = self.index_for_mouse_position(self.selection_drag_anchor(event.position));
         self.select_to(offset, cx);
+    }
+
+    /// The position a drag resolves its text offset from: the pointer, with the
+    /// vertical component pulled just inside the viewport.
+    ///
+    /// Past an edge there is no text to hit, so the offset is whatever sits at
+    /// the edge and the autoscroll brings the next line to it — the alternative
+    /// (resolving against lines that were never laid out) is what made a drag
+    /// past the top jump to the start of the visible text and stick there.
+    fn selection_drag_anchor(&self, position: Point<Pixels>) -> Point<Pixels> {
+        let bounds = self.input_bounds;
+        let Some(line_height) = self
+            .last_layout
+            .as_ref()
+            .map(|last_layout| last_layout.line_height)
+        else {
+            return position;
+        };
+        if bounds.size.height <= px(0.) {
+            return position;
+        }
+
+        let inset = line_height.half().min(bounds.size.height / 4.);
+        let top = bounds.top() + inset;
+        let bottom = (bounds.bottom() - inset).max(top);
+        point(position.x, position.y.clamp(top, bottom))
+    }
+
+    /// Start or stop the drag-selection autoscroll to match the pointer.
+    fn update_selection_autoscroll(&mut self, cx: &mut Context<Self>) {
+        let wants_autoscroll = self.selecting && self.selection_autoscroll_delta().is_some();
+        if !wants_autoscroll {
+            self.selection_autoscrolling = false;
+            return;
+        }
+        if self.selection_autoscrolling {
+            return;
+        }
+
+        self.selection_autoscrolling = true;
+        self._selection_autoscroll_task = Some(cx.spawn(async move |state, cx| {
+            loop {
+                cx.background_executor()
+                    .timer(SELECTION_AUTOSCROLL_INTERVAL)
+                    .await;
+                let Ok(keep_scrolling) =
+                    state.update(cx, |state, cx| state.autoscroll_selection_once(cx))
+                else {
+                    break;
+                };
+                if !keep_scrolling {
+                    break;
+                }
+            }
+        }));
+    }
+
+    /// Scroll distance for the next autoscroll tick, given where the drag is now.
+    ///
+    /// A single-line input has no vertical scroll to give, and claiming the drag
+    /// anyway would stand down the tracking that keeps its *column* in view.
+    fn selection_autoscroll_delta(&self) -> Option<Pixels> {
+        if self.mode.is_single_line() {
+            return None;
+        }
+        let position = self.selection_drag_position?;
+        let line_height = self.last_layout.as_ref()?.line_height;
+        selection_autoscroll_delta(position.y, self.input_bounds, line_height)
+    }
+
+    /// One autoscroll step: move the viewport, then re-resolve the selection so
+    /// it keeps up with the text scrolling under a stationary pointer.
+    ///
+    /// Returns whether the loop should keep ticking.
+    fn autoscroll_selection_once(&mut self, cx: &mut Context<Self>) -> bool {
+        if !self.selecting {
+            self.selection_autoscrolling = false;
+            return false;
+        }
+        let (Some(position), Some(delta)) = (
+            self.selection_drag_position,
+            self.selection_autoscroll_delta(),
+        ) else {
+            self.selection_autoscrolling = false;
+            return false;
+        };
+
+        let old_offset = self.scroll_handle.offset();
+        self.update_scroll_offset(Some(old_offset + point(px(0.), delta)), cx);
+        if self.scroll_handle.offset() == old_offset {
+            // Already at the end of the text; there is nothing left to reveal.
+            self.selection_autoscrolling = false;
+            return false;
+        }
+
+        // The layout this resolves against is the one painted before this tick's
+        // scroll, so the selection trails the viewport by a frame — which is what
+        // keeps it landing on a line the user can actually see.
+        let offset = self.index_for_mouse_position(self.selection_drag_anchor(position));
+        self.select_to(offset, cx);
+        true
+    }
+
+    /// Finish a drag selection, whether it ended over the input or outside it.
+    fn end_selection_drag(&mut self) {
+        self.selecting = false;
+        self.selection_drag_position = None;
+        self.selection_autoscrolling = false;
+        self._selection_autoscroll_task = None;
     }
 
     fn is_valid_input(&self, new_text: &str, cx: &mut Context<Self>) -> bool {
@@ -2648,11 +2958,243 @@ impl Render for InputState {
             .id("input-state")
             .flex_1()
             .when(self.mode.is_multi_line(), |this| this.h_full())
-            .flex_grow()
+            .flex_grow(1.0)
             .overflow_x_hidden()
             .child(TextElement::new(cx.entity().clone()).placeholder(self.placeholder.clone()))
             .children(self.diagnostic_popover.clone())
             .children(self.context_menu.as_ref().map(|menu| menu.render()))
             .children(self.hover_popover.clone())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        SCROLL_CHAIN_GESTURE_SEPARATION, SCROLL_CHAIN_RELEASE_DISTANCE, ScrollChainLatch,
+        scroll_chain_consumes_event, selection_autoscroll_delta,
+    };
+    use gpui::{Bounds, Pixels, Point, TouchPhase, point, px, size};
+    use std::time::Instant;
+
+    fn wheel_up(pixels: f32) -> Point<Pixels> {
+        point(px(0.), px(pixels))
+    }
+
+    /// A viewport 200px tall starting 100px down the window, with 20px lines.
+    fn viewport() -> Bounds<Pixels> {
+        Bounds::new(point(px(0.), px(100.)), size(px(400.), px(200.)))
+    }
+
+    #[test]
+    fn a_gesture_that_scrolled_the_input_keeps_the_events_that_follow_it() {
+        let mut latch = ScrollChainLatch::default();
+        let now = Instant::now();
+
+        assert!(scroll_chain_consumes_event(
+            &mut latch,
+            now,
+            TouchPhase::Moved,
+            wheel_up(30.),
+            true,
+        ));
+        // Content ran out mid-gesture: the input holds the scroll rather than
+        // handing it straight to whatever it floats over.
+        assert!(scroll_chain_consumes_event(
+            &mut latch,
+            now,
+            TouchPhase::Moved,
+            wheel_up(30.),
+            false,
+        ));
+    }
+
+    #[test]
+    fn a_gesture_that_begins_at_the_bound_chains_immediately() {
+        let mut latch = ScrollChainLatch::default();
+
+        assert!(!scroll_chain_consumes_event(
+            &mut latch,
+            Instant::now(),
+            TouchPhase::Started,
+            wheel_up(30.),
+            false,
+        ));
+    }
+
+    #[test]
+    fn pushing_past_the_release_distance_hands_the_scroll_on() {
+        let mut latch = ScrollChainLatch::default();
+        let now = Instant::now();
+        let step = px(30.);
+
+        assert!(scroll_chain_consumes_event(
+            &mut latch,
+            now,
+            TouchPhase::Moved,
+            point(px(0.), step),
+            true,
+        ));
+
+        let mut pushed = px(0.);
+        let mut released = false;
+        while pushed < SCROLL_CHAIN_RELEASE_DISTANCE * 2. {
+            pushed += step;
+            if !scroll_chain_consumes_event(
+                &mut latch,
+                now,
+                TouchPhase::Moved,
+                point(px(0.), step),
+                false,
+            ) {
+                released = true;
+                break;
+            }
+        }
+
+        assert!(released, "a sustained push must reach the surface behind");
+        assert!(
+            pushed >= SCROLL_CHAIN_RELEASE_DISTANCE,
+            "the hand-off must not happen before the grace distance is used up"
+        );
+        // Once released, the rest of the gesture stays released.
+        assert!(!scroll_chain_consumes_event(
+            &mut latch,
+            now,
+            TouchPhase::Moved,
+            point(px(0.), step),
+            false,
+        ));
+    }
+
+    #[test]
+    fn scrolling_again_restores_the_full_grace_distance() {
+        let mut latch = ScrollChainLatch::default();
+        let now = Instant::now();
+
+        scroll_chain_consumes_event(&mut latch, now, TouchPhase::Moved, wheel_up(30.), true);
+        scroll_chain_consumes_event(&mut latch, now, TouchPhase::Moved, wheel_up(30.), false);
+        assert!(latch.overscroll > px(0.));
+
+        scroll_chain_consumes_event(&mut latch, now, TouchPhase::Moved, wheel_up(30.), true);
+        assert_eq!(latch.overscroll, px(0.));
+    }
+
+    #[test]
+    fn a_pause_ends_the_gesture_so_the_next_flick_chains() {
+        let mut latch = ScrollChainLatch::default();
+        let now = Instant::now();
+
+        scroll_chain_consumes_event(&mut latch, now, TouchPhase::Moved, wheel_up(30.), true);
+
+        let later = now + SCROLL_CHAIN_GESTURE_SEPARATION;
+        assert!(!scroll_chain_consumes_event(
+            &mut latch,
+            later,
+            TouchPhase::Moved,
+            wheel_up(30.),
+            false,
+        ));
+    }
+
+    #[test]
+    fn momentum_after_the_fingers_lift_never_reaches_the_surface_behind() {
+        let mut latch = ScrollChainLatch::default();
+        let now = Instant::now();
+
+        scroll_chain_consumes_event(&mut latch, now, TouchPhase::Moved, wheel_up(30.), true);
+        // The lift, then the momentum tail that macOS sends behind it as `Moved`.
+        scroll_chain_consumes_event(&mut latch, now, TouchPhase::Ended, wheel_up(0.), false);
+
+        // A hard flick coasts far past the end of the text; none of it counts as
+        // the user asking to keep going.
+        let mut coasted = px(0.);
+        while coasted < SCROLL_CHAIN_RELEASE_DISTANCE * 4. {
+            coasted += px(80.);
+            assert!(
+                scroll_chain_consumes_event(
+                    &mut latch,
+                    now,
+                    TouchPhase::Moved,
+                    wheel_up(80.),
+                    false,
+                ),
+                "momentum must not spill into the surface behind the input"
+            );
+        }
+    }
+
+    #[test]
+    fn a_deliberate_second_flick_is_a_new_gesture() {
+        let mut latch = ScrollChainLatch::default();
+        let now = Instant::now();
+
+        scroll_chain_consumes_event(&mut latch, now, TouchPhase::Moved, wheel_up(30.), true);
+        scroll_chain_consumes_event(&mut latch, now, TouchPhase::Ended, wheel_up(0.), false);
+
+        // Fingers back down at the bound: nothing left for the input to scroll,
+        // so the surface behind gets it immediately.
+        assert!(!scroll_chain_consumes_event(
+            &mut latch,
+            now,
+            TouchPhase::Started,
+            wheel_up(30.),
+            false,
+        ));
+    }
+
+    #[test]
+    fn a_cancelled_gesture_leaves_no_latch_behind() {
+        let mut latch = ScrollChainLatch::default();
+        let now = Instant::now();
+
+        scroll_chain_consumes_event(&mut latch, now, TouchPhase::Moved, wheel_up(30.), true);
+        scroll_chain_consumes_event(&mut latch, now, TouchPhase::Cancelled, wheel_up(0.), false);
+        assert!(!latch.owns_gesture);
+    }
+
+    #[test]
+    fn a_pointer_inside_the_input_does_not_autoscroll() {
+        assert_eq!(
+            selection_autoscroll_delta(px(200.), viewport(), px(20.)),
+            None
+        );
+    }
+
+    #[test]
+    fn dragging_past_an_edge_scrolls_toward_it() {
+        let above = selection_autoscroll_delta(px(60.), viewport(), px(20.))
+            .expect("a drag above the input should autoscroll");
+        let below = selection_autoscroll_delta(px(340.), viewport(), px(20.))
+            .expect("a drag below the input should autoscroll");
+
+        // Positive moves the content down, toward the start of the text.
+        assert!(above > px(0.));
+        assert!(below < px(0.));
+    }
+
+    #[test]
+    fn autoscroll_speed_ramps_with_distance_and_then_holds() {
+        let near = selection_autoscroll_delta(px(100.), viewport(), px(20.))
+            .expect("at the edge the drag should still travel");
+        let far = selection_autoscroll_delta(px(0.), viewport(), px(20.))
+            .expect("well outside the input the drag should travel faster");
+        let further = selection_autoscroll_delta(px(-2000.), viewport(), px(20.))
+            .expect("a drag thrown across the window should still autoscroll");
+
+        assert!(far > near);
+        assert_eq!(further, far.max(further));
+        assert!(
+            further <= px(20.) * super::SELECTION_AUTOSCROLL_MAX_SPEED,
+            "per-tick distance must stay capped however far the pointer goes"
+        );
+    }
+
+    #[test]
+    fn a_degenerate_layout_never_autoscrolls() {
+        assert_eq!(selection_autoscroll_delta(px(0.), viewport(), px(0.)), None);
+        assert_eq!(
+            selection_autoscroll_delta(px(0.), Bounds::default(), px(20.)),
+            None
+        );
     }
 }

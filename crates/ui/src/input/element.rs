@@ -175,6 +175,13 @@ impl TextElement {
             (cursor_pos, cursor_start, cursor_end)
         {
             let selection_changed = state.last_selected_range != Some(selected_range);
+            // While a drag selection is autoscrolling, that loop owns the
+            // vertical offset. The tracking below moves in whole `line_height`
+            // steps once per frame, so leaving it on during a drag makes the
+            // viewport lurch a line at a time on top of the smooth scroll. Only
+            // the vertical half stands down — a diagonal drag still has to keep
+            // the cursor's column in view.
+            let track_selection_y = !state.selection_autoscrolling;
             if selection_changed && !is_selected_all {
                 // Apart from left alignment, just leave enough space for the cursor size on the right side.
                 let safety_margin = if last_layout.text_align == TextAlign::Left {
@@ -197,8 +204,10 @@ impl TextElement {
 
                 // If we change the scroll_offset.y, GPUI will render and trigger the next run loop.
                 // So, here we just adjust offset by `line_height` for move smooth.
-                scroll_offset.y =
-                    if scroll_offset.y + cursor_pos.y > bounds.size.height - top_bottom_margin {
+                if track_selection_y {
+                    scroll_offset.y = if scroll_offset.y + cursor_pos.y
+                        > bounds.size.height - top_bottom_margin
+                    {
                         // cursor is out of bottom
                         scroll_offset.y - line_height
                     } else if scroll_offset.y + cursor_pos.y < top_bottom_margin {
@@ -207,6 +216,7 @@ impl TextElement {
                     } else {
                         scroll_offset.y
                     };
+                }
 
                 // For selection to move scroll
                 if state.selection_reversed {
@@ -214,7 +224,7 @@ impl TextElement {
                         // selection start is out of left
                         scroll_offset.x = -cursor_start.x;
                     }
-                    if scroll_offset.y + cursor_start.y < px(0.) {
+                    if track_selection_y && scroll_offset.y + cursor_start.y < px(0.) {
                         // selection start is out of top
                         scroll_offset.y = -cursor_start.y;
                     }
@@ -225,7 +235,7 @@ impl TextElement {
                         // selection end is out of left
                         scroll_offset.x = -cursor_end.x;
                     }
-                    if scroll_offset.y + cursor_end.y <= px(0.) {
+                    if track_selection_y && scroll_offset.y + cursor_end.y <= px(0.) {
                         // selection end is out of top
                         scroll_offset.y = -cursor_end.y;
                     }
@@ -762,11 +772,13 @@ impl TextElement {
 
             for range in &line_item.wrapped_lines {
                 let line_runs = runs_for_range(runs, offset, &range);
+                let wrapped_line_start =
+                    visible_range_offset.start + offset + range.start;
                 let line_runs = if bg_segments.is_empty() {
                     line_runs
                 } else {
                     split_runs_by_bg_segments(
-                        visible_range_offset.start + offset,
+                        wrapped_line_start,
                         &line_runs,
                         bg_segments,
                     )
@@ -775,7 +787,7 @@ impl TextElement {
                     line_runs
                 } else {
                     split_runs_by_inline_badges(
-                        visible_range_offset.start + offset,
+                        wrapped_line_start,
                         &line_runs,
                         &inline_badge_segments,
                     )
@@ -992,7 +1004,9 @@ impl Element for TextElement {
         let (display_text, text_color) = if is_empty {
             (
                 &Rope::from(placeholder.as_str()),
-                cx.theme().muted_foreground,
+                state
+                    .placeholder_color
+                    .unwrap_or_else(|| cx.theme().muted_foreground),
             )
         } else if state.masked {
             (
@@ -1049,51 +1063,38 @@ impl Element for TextElement {
             strikethrough: None,
         };
 
-        let runs = if !is_empty {
-            if let Some(highlight_styles) = highlight_styles {
-                let mut runs = vec![];
+        // The composition underline is applied by splitting whatever runs the
+        // text already has at the marked range's edges. Keying off the marked
+        // range alone (rather than off "the input is empty") is what makes the
+        // underline show up in an input that already has text, and splitting on
+        // intersection rather than containment is what keeps it whole when the
+        // composition crosses a syntax-highlight boundary.
+        let ime_marked_range = state
+            .ime_marked_range
+            .as_ref()
+            .map(|marked| marked.start..marked.end);
+        let runs = if let (false, Some(highlight_styles)) = (is_empty, highlight_styles) {
+            let mut runs = Vec::with_capacity(highlight_styles.len() + 2);
 
-                runs.extend(highlight_styles.iter().map(|(range, style)| {
-                    let mut run = text_style.clone().highlight(*style).to_run(range.len());
-                    if let Some(ime_marked_range) = &state.ime_marked_range {
-                        if range.start >= ime_marked_range.start
-                            && range.end <= ime_marked_range.end
-                        {
-                            run.color = marked_run.color;
-                            run.strikethrough = marked_run.strikethrough;
-                            run.underline = marked_run.underline;
-                        }
-                    }
-
-                    run
-                }));
-
-                runs.into_iter().filter(|run| run.len > 0).collect()
-            } else {
-                vec![run]
+            for (range, style) in &highlight_styles {
+                let run = text_style.clone().highlight(*style).to_run(range.len());
+                runs.extend(split_run_for_ime_underline(
+                    run,
+                    range.clone(),
+                    ime_marked_range.clone(),
+                    marked_run.underline,
+                ));
             }
-        } else if let Some(ime_marked_range) = &state.ime_marked_range {
-            // IME marked text
-            vec![
-                TextRun {
-                    len: ime_marked_range.start,
-                    ..run.clone()
-                },
-                TextRun {
-                    len: ime_marked_range.end - ime_marked_range.start,
-                    underline: marked_run.underline,
-                    ..run.clone()
-                },
-                TextRun {
-                    len: display_text.len() - ime_marked_range.end,
-                    ..run.clone()
-                },
-            ]
-            .into_iter()
-            .filter(|run| run.len > 0)
-            .collect()
+
+            runs
         } else {
-            vec![run]
+            split_run_for_ime_underline(
+                run,
+                0..display_text.len(),
+                ime_marked_range,
+                marked_run.underline,
+            )
+            .into_vec()
         };
 
         let document_colors = state
@@ -1488,15 +1489,17 @@ impl Element for TextElement {
                                     line_height - badge.style.vertical_inset * 2.,
                                 );
                                 let pill_bounds = Bounds::new(pill_origin, pill_size);
-                                window.paint_quad(quad(
-                                    pill_bounds,
-                                    Corners::all(badge.style.corner_radius)
-                                        .clamp_radii_for_quad_size(pill_size),
-                                    badge.style.background_color,
-                                    Edges::default(),
-                                    gpui::transparent_black(),
-                                    BorderStyle::default(),
-                                ));
+                                if badge.style.background_color.a > 0. {
+                                    window.paint_quad(quad(
+                                        pill_bounds,
+                                        Corners::all(badge.style.corner_radius)
+                                            .clamp_radii_for_quad_size(pill_size),
+                                        badge.style.background_color,
+                                        Edges::default(),
+                                        gpui::transparent_black(),
+                                        BorderStyle::default(),
+                                    ));
+                                }
 
                                 if visual_line == start_visual_line
                                     && let Some(icon_path) = badge.style.icon_path.clone()
@@ -1506,7 +1509,8 @@ impl Element for TextElement {
                                             p.x + x_start + badge.style.icon_left_inset,
                                             pill_bounds.origin.y
                                                 + (pill_bounds.size.height - badge.style.icon_size)
-                                                    / 2.,
+                                                    / 2.
+                                                + badge.style.icon_top_inset,
                                         ),
                                         size(badge.style.icon_size, badge.style.icon_size),
                                     );
@@ -1719,6 +1723,53 @@ pub(super) fn runs_for_range(
     }
 
     result
+}
+
+/// Split `run` so the part of it covered by the IME composition carries the
+/// composition underline, leaving the rest untouched.
+///
+/// `run_range` is `run`'s own byte range in the same coordinate space as
+/// `marked_range`. The split is on the intersection, so a composition that only
+/// partly overlaps a syntax-highlight run still underlines the overlap instead
+/// of dropping the underline entirely.
+fn split_run_for_ime_underline(
+    run: TextRun,
+    run_range: Range<usize>,
+    marked_range: Option<Range<usize>>,
+    marked_underline: Option<UnderlineStyle>,
+) -> SmallVec<[TextRun; 3]> {
+    if run.len == 0 {
+        return SmallVec::new();
+    }
+
+    let Some(marked) = marked_range else {
+        return [run].into_iter().collect();
+    };
+
+    let intersection_start = run_range.start.max(marked.start);
+    let intersection_end = run_range.end.min(marked.end);
+    if intersection_start >= intersection_end {
+        return [run].into_iter().collect();
+    }
+
+    [
+        TextRun {
+            len: intersection_start - run_range.start,
+            ..run.clone()
+        },
+        TextRun {
+            len: intersection_end - intersection_start,
+            underline: marked_underline,
+            ..run.clone()
+        },
+        TextRun {
+            len: run_range.end - intersection_end,
+            ..run
+        },
+    ]
+    .into_iter()
+    .filter(|run| run.len > 0)
+    .collect()
 }
 
 fn split_runs_by_bg_segments(
@@ -1937,5 +1988,28 @@ mod tests {
         assert_eq!(result[3].color, gpui::black());
         assert_eq!(result[4].color, gpui::black());
         assert_eq!(result[5].color, gpui::blue());
+    }
+
+    #[test]
+    fn test_split_runs_by_inline_badges_respects_wrapped_subline_start() {
+        let run = TextRun {
+            len: 0,
+            font: gpui::font(".SystemUIFont"),
+            color: gpui::black(),
+            background_color: None,
+            underline: None,
+            strikethrough: None,
+        };
+
+        let runs = vec![TextRun {
+            len: 6,
+            ..run.clone()
+        }];
+
+        let result = split_runs_by_inline_badges(12, &runs, &[(4..10, gpui::red())]);
+
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].len, 6);
+        assert_eq!(result[0].color, gpui::black());
     }
 }

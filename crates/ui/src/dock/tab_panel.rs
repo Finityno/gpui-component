@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use gpui::{
-    App, AppContext, Context, Corner, DismissEvent, Div, DragMoveEvent, Empty, Entity,
+    App, AppContext, Context, DismissEvent, Div, DragMoveEvent, Empty, Entity,
     EventEmitter, FocusHandle, Focusable, InteractiveElement as _, IntoElement, ParentElement,
     Pixels, Render, ScrollHandle, SharedString, StatefulInteractiveElement, StyleRefinement,
     Styled, WeakEntity, Window, div, prelude::FluentBuilder, px, relative, rems,
@@ -9,7 +9,7 @@ use gpui::{
 use rust_i18n::t;
 
 use crate::{
-    ActiveTheme, AxisExt, IconName, Placement, Selectable, Sizable,
+    ActiveTheme, Anchor, AxisExt, IconName, Placement, Selectable, Sizable,
     button::{Button, ButtonVariants as _},
     dock::PanelInfo,
     h_flex,
@@ -514,7 +514,7 @@ impl TabPanel {
                             })
                         }
                     })
-                    .anchor(Corner::TopRight),
+                    .anchor(Anchor::TopRight),
             )
     }
 
@@ -783,7 +783,7 @@ impl TabPanel {
                 div()
                     .id("tab-bar-empty-space")
                     .h_full()
-                    .flex_grow()
+                    .flex_grow(1.0)
                     .min_w_16()
                     .when(state.droppable, |this| {
                         this.drag_over::<DragPanel>(|this, _, _, cx| {
