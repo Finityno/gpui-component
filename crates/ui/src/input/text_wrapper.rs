@@ -127,6 +127,12 @@ impl TextWrapper {
         self.update_all(&self.text.clone(), cx);
     }
 
+    /// Whether [`Self::set_font`] or [`Self::prepare_if_need`] would change
+    /// anything.
+    pub(super) fn needs_font_or_prepare(&self, font: &Font, font_size: Pixels) -> bool {
+        !self._initialized || !self.font.eq(font) || self.font_size != font_size
+    }
+
     pub(super) fn prepare_if_need(&mut self, text: &Rope, cx: &mut App) {
         if self._initialized {
             return;
@@ -381,6 +387,32 @@ impl LineLayout {
             whitespace_chars: Vec::new(),
             whitespace_indicators: None,
         }
+    }
+
+    /// Whether `other` holds the same shaped lines. Shapings compare by
+    /// identity: the line layout cache hands back the same one for text and
+    /// fonts that did not change, so a fresh shaping counts as different.
+    pub(crate) fn same_shaping(&self, other: &Self) -> bool {
+        fn same_line(a: &ShapedLine, b: &ShapedLine) -> bool {
+            let a: &gpui::LineLayout = a;
+            let b: &gpui::LineLayout = b;
+            std::ptr::eq(a, b)
+        }
+
+        self.len == other.len
+            && self.longest_width == other.longest_width
+            && self.whitespace_chars == other.whitespace_chars
+            && self.wrapped_lines.len() == other.wrapped_lines.len()
+            && self
+                .wrapped_lines
+                .iter()
+                .zip(&other.wrapped_lines)
+                .all(|(a, b)| same_line(a, b))
+            && match (&self.whitespace_indicators, &other.whitespace_indicators) {
+                (None, None) => true,
+                (Some(a), Some(b)) => same_line(&a.space, &b.space) && same_line(&a.tab, &b.tab),
+                _ => false,
+            }
     }
 
     pub(crate) fn lines(mut self, wrapped_lines: SmallVec<[ShapedLine; 1]>) -> Self {

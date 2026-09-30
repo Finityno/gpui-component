@@ -67,9 +67,12 @@ impl InputState {
                     }
                     let hover_popover = HoverPopover::new(cx.entity(), symbol_range, &hover, cx);
                     editor.hover_popover = Some(hover_popover);
+                    cx.notify();
                 }
                 None => {
-                    editor.hover_popover = None;
+                    if editor.hover_popover.take().is_some() {
+                        cx.notify();
+                    }
                 }
             });
 

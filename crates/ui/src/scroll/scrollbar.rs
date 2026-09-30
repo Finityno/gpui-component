@@ -882,6 +882,7 @@ impl Element for Scrollbar {
                                                 offset.y,
                                             ));
                                         }
+                                        cx.notify(view_id);
                                     }
                                 }
                             }

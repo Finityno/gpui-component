@@ -971,10 +971,19 @@ impl Element for TextElement {
         let font = style.font();
         let text_size = style.font_size.to_pixels(window.rem_size());
 
-        self.state.update(cx, |state, cx| {
-            state.text_wrapper.set_font(font, text_size, cx);
-            state.text_wrapper.prepare_if_need(&state.text, cx);
-        });
+        // Only update when something changes: an update while drawing counts
+        // as a change to every other view that reads the state.
+        if self
+            .state
+            .read(cx)
+            .text_wrapper
+            .needs_font_or_prepare(&font, text_size)
+        {
+            self.state.update(cx, |state, cx| {
+                state.text_wrapper.set_font(font, text_size, cx);
+                state.text_wrapper.prepare_if_need(&state.text, cx);
+            });
+        }
 
         let state = self.state.read(cx);
         let line_height = window.line_height();
@@ -1642,16 +1651,37 @@ impl Element for TextElement {
             },
         );
 
-        self.state.update(cx, |state, cx| {
-            state.last_layout = Some(prepaint.last_layout.clone());
-            state.last_bounds = Some(bounds);
-            state.last_cursor = Some(state.cursor());
-            state.set_input_bounds(input_bounds, cx);
-            state.last_selected_range = Some(selected_range);
-            state.scroll_size = prepaint.scroll_size;
-            state.update_scroll_offset(Some(prepaint.cursor_scroll_offset), cx);
-            state.deferred_scroll_offset = None;
-        });
+        // Only update when something changes: an update while drawing counts
+        // as a change to every other view that reads the state, such as the
+        // one holding the `Input`, which would then be built again.
+        let unchanged = {
+            let state = self.state.read(cx);
+            state.deferred_scroll_offset.is_none()
+                && state.last_bounds == Some(bounds)
+                && state.input_bounds == input_bounds
+                && state.last_cursor == Some(state.cursor())
+                && state.last_selected_range == Some(selected_range)
+                && state.scroll_size == prepaint.scroll_size
+                && state.mode.auto_grow_is_current(&state.text_wrapper)
+                && state.clamped_scroll_offset(prepaint.cursor_scroll_offset)
+                    == state.scroll_handle.offset()
+                && state
+                    .last_layout
+                    .as_ref()
+                    .is_some_and(|last_layout| last_layout.same_layout(&prepaint.last_layout))
+        };
+        if !unchanged {
+            self.state.update(cx, |state, cx| {
+                state.last_layout = Some(prepaint.last_layout.clone());
+                state.last_bounds = Some(bounds);
+                state.last_cursor = Some(state.cursor());
+                state.set_input_bounds(input_bounds, cx);
+                state.last_selected_range = Some(selected_range);
+                state.scroll_size = prepaint.scroll_size;
+                state.update_scroll_offset(Some(prepaint.cursor_scroll_offset), cx);
+                state.deferred_scroll_offset = None;
+            });
+        }
 
         if let Some(hitbox) = prepaint.hover_definition_hitbox.as_ref() {
             window.set_cursor_style(gpui::CursorStyle::PointingHand, &hitbox);

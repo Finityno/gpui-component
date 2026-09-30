@@ -120,6 +120,7 @@ impl MouseContextMenu {
     #[inline]
     pub(crate) fn close(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.open = false;
+        cx.notify();
         self.editor.update(cx, |this, cx| {
             this.focus(window, cx);
         });
