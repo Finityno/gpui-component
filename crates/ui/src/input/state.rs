@@ -350,6 +350,26 @@ pub(super) struct LastLayout {
 }
 
 impl LastLayout {
+    /// Whether `other` lays out the same shaped lines at the same places.
+    pub(super) fn same_layout(&self, other: &Self) -> bool {
+        self.visible_range == other.visible_range
+            && self.visible_top == other.visible_top
+            && self.visible_range_offset == other.visible_range_offset
+            && self.line_height == other.line_height
+            && self.wrap_width == other.wrap_width
+            && self.line_number_width == other.line_number_width
+            && self.cursor_bounds == other.cursor_bounds
+            && self.text_align == other.text_align
+            && self.content_width == other.content_width
+            && (Rc::ptr_eq(&self.lines, &other.lines)
+                || (self.lines.len() == other.lines.len()
+                    && self
+                        .lines
+                        .iter()
+                        .zip(other.lines.iter())
+                        .all(|(a, b)| a.same_shaping(b))))
+    }
+
     /// Get the line layout for the given row (0-based).
     ///
     /// 0 is the viewport first visible line.
@@ -1759,7 +1779,15 @@ impl InputState {
         cx: &mut Context<Self>,
     ) {
         let current_offset = self.scroll_handle.offset();
-        let mut offset = offset.unwrap_or(current_offset);
+        let offset = self.clamped_scroll_offset(offset.unwrap_or(current_offset));
+        if offset != current_offset {
+            self.scroll_handle.set_offset(offset);
+            cx.notify();
+        }
+    }
+
+    /// The scroll offset [`Self::update_scroll_offset`] would set for `offset`.
+    pub(super) fn clamped_scroll_offset(&self, mut offset: Point<Pixels>) -> Point<Pixels> {
         // In addition to left alignment, a cursor position will be reserved on the right side
         let safe_x_offset = if self.text_align == TextAlign::Left {
             px(0.)
@@ -1778,10 +1806,7 @@ impl InputState {
             offset.y.clamp(safe_y_range.start, safe_y_range.end)
         };
         offset.x = offset.x.clamp(safe_x_range.start, safe_x_range.end);
-        if offset != current_offset {
-            self.scroll_handle.set_offset(offset);
-            cx.notify();
-        }
+        offset
     }
 
     /// Scroll to make the given offset visible.

@@ -138,6 +138,25 @@ impl InputMode {
         self.set_rows(wrapped_lines);
     }
 
+    /// Whether [`Self::update_auto_grow`] would leave the rows as they are.
+    pub(super) fn auto_grow_is_current(&self, text_wrapper: &TextWrapper) -> bool {
+        if self.is_single_line() {
+            return true;
+        }
+
+        let wrapped_lines = text_wrapper.len();
+        match self {
+            InputMode::PlainText { rows, .. } | InputMode::CodeEditor { rows, .. } => {
+                *rows == wrapped_lines
+            }
+            InputMode::AutoGrow {
+                rows,
+                min_rows,
+                max_rows,
+            } => *rows == wrapped_lines.clamp(*min_rows, *max_rows),
+        }
+    }
+
     /// At least 1 row be return.
     pub(super) fn rows(&self) -> usize {
         if !self.is_multi_line() {

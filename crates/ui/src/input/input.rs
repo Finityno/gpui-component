@@ -243,14 +243,25 @@ impl RenderOnce for Input {
         const LINE_HEIGHT: Rems = Rems(1.25);
         let text_align = self.style.text.text_align.unwrap_or(TextAlign::Left);
 
-        self.state.update(cx, |state, _| {
-            state.disabled = self.disabled;
-            state.size = self.size;
-            // Only for single line mode
-            if state.mode.is_single_line() {
-                state.text_align = text_align;
-            }
-        });
+        // Only update when something changes: an update while drawing counts
+        // as a change to the input state view, which would then be built
+        // again on the next frame.
+        let changed = {
+            let state = self.state.read(cx);
+            state.disabled != self.disabled
+                || state.size != self.size
+                || (state.mode.is_single_line() && state.text_align != text_align)
+        };
+        if changed {
+            self.state.update(cx, |state, _| {
+                state.disabled = self.disabled;
+                state.size = self.size;
+                // Only for single line mode
+                if state.mode.is_single_line() {
+                    state.text_align = text_align;
+                }
+            });
+        }
 
         let state = self.state.read(cx);
         let focused = state.focus_handle.is_focused(window) && !state.disabled;
