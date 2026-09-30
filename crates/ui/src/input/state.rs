@@ -622,7 +622,16 @@ impl InputState {
 
         let _subscriptions = vec![
             // Observe the blink cursor to repaint the view when it changes.
-            cx.observe(&blink_cursor, |_, _, cx| cx.notify()),
+            // With view retention on, the view is drawn again already: the
+            // text element reads the blink cursor while this view is built.
+            // Notifying as well would build every view that reads this
+            // state on each blink. Without retention it is still needed, as
+            // a cached view around the input only knows about notified views.
+            cx.observe(&blink_cursor, |_, _, cx| {
+                if !cx.view_retention() {
+                    cx.notify();
+                }
+            }),
             // Blink the cursor when the window is active, pause when it's not.
             cx.observe_window_activation(window, |input, window, cx| {
                 if window.is_window_active() {
