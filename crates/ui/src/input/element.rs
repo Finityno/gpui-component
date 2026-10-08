@@ -740,7 +740,7 @@ impl TextElement {
         if state.text.len() == 0 {
             return display_text
                 .to_string()
-                .split("\n")
+                .split('\n')
                 .map(|line| {
                     let shaped_line = window.text_system().shape_line(
                         line.to_string().into(),
@@ -757,9 +757,9 @@ impl TextElement {
             .slice_lines(visible_range.start..visible_range.end)
             .to_string();
 
-        let mut lines = vec![];
+        let mut lines = Vec::with_capacity(visible_range.len());
         let mut offset = 0;
-        for (ix, line) in visible_text.split("\n").enumerate() {
+        for (ix, line) in visible_text.split('\n').enumerate() {
             let line_item = text_wrapper
                 .lines
                 .get(visible_range.start + ix)
@@ -1122,7 +1122,19 @@ impl Element for TextElement {
         let mut longest_line_width = wrap_width.unwrap_or(px(0.));
         // 1. Single line
         // 2. Multi-line with soft wrap disabled.
-        if state.mode.is_single_line() || !state.soft_wrap {
+        // A plain single-line input already shaped this exact text with the same
+        // font and size in `layout_lines`; only the run colors differ, which do
+        // not change the width, so it is not shaped a second time every frame.
+        if state.mode.is_single_line()
+            && !state.mode.is_code_editor()
+            && !is_empty
+            && !state.masked
+            && state.inline_badges.is_empty()
+            && state.ime_marked_range.is_none()
+            && state.text.lines_len() == 1
+        {
+            longest_line_width = lines.first().map_or(px(0.), |line| line.longest_width);
+        } else if state.mode.is_single_line() || !state.soft_wrap {
             let longest_row = state.text_wrapper.longest_row.row;
             let longest_line: SharedString = state.text.slice_line(longest_row).to_string().into();
             longest_line_width = window
