@@ -49,6 +49,8 @@ impl BlinkCursor {
     pub fn hold_visible(&mut self, cx: &mut Context<Self>) {
         self.next_epoch();
         self._task = Task::ready(());
+        // Canceling the pause timer must not leave reactivation paused.
+        self.paused = false;
         if !self.visible {
             self.visible = true;
             cx.notify();
@@ -159,5 +161,33 @@ mod tests {
         cx.executor().advance_clock(INTERVAL * 4);
         cx.run_until_parked();
         assert!(notifications.get() > held_at, "start resumes blinking");
+    }
+
+    #[gpui::test]
+    fn holding_a_paused_cursor_resumes_after_reactivation(cx: &mut TestAppContext) {
+        let cursor = cx.new(|_| BlinkCursor::new());
+        let notifications = Rc::new(Cell::new(0));
+        let _subscription = cx.update({
+            let notifications = notifications.clone();
+            |cx| {
+                cx.observe(&cursor, move |_, _| {
+                    notifications.set(notifications.get() + 1)
+                })
+            }
+        });
+
+        cursor.update(cx, |cursor, cx| cursor.pause(cx));
+        cursor.update(cx, |cursor, cx| cursor.hold_visible(cx));
+        cx.run_until_parked();
+        let held_at = notifications.get();
+        cx.executor().advance_clock(INTERVAL * 20);
+        cx.run_until_parked();
+        assert_eq!(notifications.get(), held_at);
+        assert!(cursor.read_with(cx, |cursor, _| cursor.visible()));
+
+        cursor.update(cx, |cursor, cx| cursor.start(cx));
+        cx.executor().advance_clock(INTERVAL * 4);
+        cx.run_until_parked();
+        assert!(notifications.get() > held_at, "reactivation resumes blinking");
     }
 }
