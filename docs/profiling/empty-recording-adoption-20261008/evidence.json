@@ -1,0 +1,28 @@
+{
+  "status": "Qualified coherent root dependency adoption; pending final owned component review/merge.",
+  "component_source": "416793e0806a5a06f64c9c38878d5018ddaa95f5",
+  "component_base": "7eec25934e487e684a96326e212f690f6a4d4aa8",
+  "all_four_root_gpui_pins": "3b9c5f36f2b0bc39a70160ac430411efec4dfd48",
+  "library_and_macro_source_unchanged": true,
+  "checked_fincode_source": "c9b430e810e61711cc4535473d6bff052107b249",
+  "checks": [
+    "Full component locked online metadata",
+    "Scoped Fincode chat/editor/workspace compile",
+    "Real native UI retention on/off, census and marquee",
+    "Strict UI/component library Clippy",
+    "Dependency/file-size/Tokio guards"
+  ],
+  "registry_records_unchanged_after_cargo_regeneration": true,
+  "adverse": "Initial offline metadata failed on uncached accesskit_consumer; actual graph validates with normal source download. Prior owned integration cache rlib/rmeta compressed losslessly with per-file roundtrip hashes; binaries/shared externs/raw samples untouched.",
+  "fork_qualification": "Owned rendering source3b9c5f3 qualifies600 native children; target snapshot requested heap50%lower, calls36.36\u201343.75%lower, four targetCPU32.44\u201338.83%lower. These are component fixtures.",
+  "limits": [
+    "No app/GPU/shipped allocator/macOS/Windows percentage",
+    "Full story/component suite and physical renderer unexecuted",
+    "No installed app launch/kill or Actions validation"
+  ],
+  "archive": {
+    "sha256": "4910ffe58efe77fecc241fcceb60193f0792c999bee53ca10f508b42449962ad",
+    "bytes": 787980,
+    "members": 39
+  }
+}
