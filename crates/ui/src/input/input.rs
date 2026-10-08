@@ -1,8 +1,13 @@
+use std::any::TypeId;
+use std::panic::Location;
+
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
-    AnyElement, App, DefiniteLength, Edges, EdgesRefinement, Entity, InteractiveElement as _,
-    IntoElement, IsZero, MouseButton, ParentElement as _, Rems, RenderOnce, StyleRefinement,
-    Styled, TextAlign, Window, div, px, relative,
+    Action, AnyElement, App, Bounds, Context, DefiniteLength, DispatchPhase, Edges,
+    EdgesRefinement, Element, ElementId, Entity, GlobalElementId, InspectorElementId,
+    InteractiveElement as _, IntoElement, IsZero, LayoutId, MouseButton, ParentElement as _,
+    Pixels, Rems, RenderOnce, StyleRefinement, Styled, TextAlign, Visibility, WeakEntity, Window,
+    div, px, relative,
 };
 
 use crate::button::{Button, ButtonVariants as _};
@@ -289,69 +294,16 @@ impl RenderOnce for Input {
             && state.text.len() > 0
             && state.mode.is_single_line();
         let has_suffix = suffix.is_some() || state.loading || self.mask_toggle || show_clear_button;
+        let editable = !state.disabled;
+        let multi_line = state.mode.is_multi_line();
+        let hidden = self.style.visibility == Some(Visibility::Hidden);
 
-        div()
+        let input = div()
             .id(("input", self.state.entity_id()))
             .flex()
             .key_context(crate::input::CONTEXT)
             .track_focus(&state.focus_handle.clone())
             .tab_index(self.tab_index)
-            .when(!state.disabled, |this| {
-                this.on_action(window.listener_for(&self.state, InputState::backspace))
-                    .on_action(window.listener_for(&self.state, InputState::delete))
-                    .on_action(
-                        window.listener_for(&self.state, InputState::delete_to_beginning_of_line),
-                    )
-                    .on_action(window.listener_for(&self.state, InputState::delete_to_end_of_line))
-                    .on_action(window.listener_for(&self.state, InputState::delete_previous_word))
-                    .on_action(window.listener_for(&self.state, InputState::delete_next_word))
-                    .on_action(window.listener_for(&self.state, InputState::enter))
-                    .on_action(window.listener_for(&self.state, InputState::escape))
-                    .on_action(window.listener_for(&self.state, InputState::paste))
-                    .on_action(window.listener_for(&self.state, InputState::cut))
-                    .on_action(window.listener_for(&self.state, InputState::undo))
-                    .on_action(window.listener_for(&self.state, InputState::redo))
-                    .when(state.mode.is_multi_line(), |this| {
-                        this.on_action(window.listener_for(&self.state, InputState::indent_inline))
-                            .on_action(window.listener_for(&self.state, InputState::outdent_inline))
-                            .on_action(window.listener_for(&self.state, InputState::indent_block))
-                            .on_action(window.listener_for(&self.state, InputState::outdent_block))
-                    })
-                    .on_action(
-                        window.listener_for(&self.state, InputState::on_action_toggle_code_actions),
-                    )
-            })
-            .on_action(window.listener_for(&self.state, InputState::left))
-            .on_action(window.listener_for(&self.state, InputState::right))
-            .on_action(window.listener_for(&self.state, InputState::select_left))
-            .on_action(window.listener_for(&self.state, InputState::select_right))
-            .when(state.mode.is_multi_line(), |this| {
-                this.on_action(window.listener_for(&self.state, InputState::up))
-                    .on_action(window.listener_for(&self.state, InputState::down))
-                    .on_action(window.listener_for(&self.state, InputState::select_up))
-                    .on_action(window.listener_for(&self.state, InputState::select_down))
-                    .on_action(window.listener_for(&self.state, InputState::page_up))
-                    .on_action(window.listener_for(&self.state, InputState::page_down))
-                    .on_action(
-                        window.listener_for(&self.state, InputState::on_action_go_to_definition),
-                    )
-            })
-            .on_action(window.listener_for(&self.state, InputState::select_all))
-            .on_action(window.listener_for(&self.state, InputState::select_to_start_of_line))
-            .on_action(window.listener_for(&self.state, InputState::select_to_end_of_line))
-            .on_action(window.listener_for(&self.state, InputState::select_to_previous_word))
-            .on_action(window.listener_for(&self.state, InputState::select_to_next_word))
-            .on_action(window.listener_for(&self.state, InputState::home))
-            .on_action(window.listener_for(&self.state, InputState::end))
-            .on_action(window.listener_for(&self.state, InputState::move_to_start))
-            .on_action(window.listener_for(&self.state, InputState::move_to_end))
-            .on_action(window.listener_for(&self.state, InputState::move_to_previous_word))
-            .on_action(window.listener_for(&self.state, InputState::move_to_next_word))
-            .on_action(window.listener_for(&self.state, InputState::select_to_start))
-            .on_action(window.listener_for(&self.state, InputState::select_to_end))
-            .on_action(window.listener_for(&self.state, InputState::show_character_palette))
-            .on_action(window.listener_for(&self.state, InputState::copy))
-            .on_action(window.listener_for(&self.state, InputState::on_action_search))
             .on_key_down(window.listener_for(&self.state, InputState::on_key_down))
             .on_mouse_down(
                 MouseButton::Left,
@@ -449,6 +401,226 @@ impl RenderOnce for Input {
                         })
                         .children(suffix),
                 )
-            })
+            });
+
+        InputActions {
+            state: self.state.downgrade(),
+            editable,
+            multi_line,
+            hidden,
+            child: input.into_any_element(),
+        }
+    }
+}
+
+struct InputActions {
+    state: WeakEntity<InputState>,
+    editable: bool,
+    multi_line: bool,
+    hidden: bool,
+    child: AnyElement,
+}
+
+impl InputActions {
+    fn on_action<A: Action>(
+        &self,
+        window: &mut Window,
+        listener: impl Fn(&mut InputState, &A, &mut Window, &mut Context<InputState>) + 'static,
+    ) {
+        let state = self.state.clone();
+        window.on_action(TypeId::of::<A>(), move |action, phase, window, cx| {
+            if phase != DispatchPhase::Bubble {
+                return;
+            }
+            if let Some(action) = action.downcast_ref::<A>() {
+                state
+                    .update(cx, |state, cx| listener(state, action, window, cx))
+                    .ok();
+            }
+        });
+    }
+
+    fn register(&self, window: &mut Window) {
+        if self.editable {
+            self.on_action(window, InputState::backspace);
+            self.on_action(window, InputState::delete);
+            self.on_action(window, InputState::delete_to_beginning_of_line);
+            self.on_action(window, InputState::delete_to_end_of_line);
+            self.on_action(window, InputState::delete_previous_word);
+            self.on_action(window, InputState::delete_next_word);
+            self.on_action(window, InputState::enter);
+            self.on_action(window, InputState::escape);
+            self.on_action(window, InputState::paste);
+            self.on_action(window, InputState::cut);
+            self.on_action(window, InputState::undo);
+            self.on_action(window, InputState::redo);
+            if self.multi_line {
+                self.on_action(window, InputState::indent_inline);
+                self.on_action(window, InputState::outdent_inline);
+                self.on_action(window, InputState::indent_block);
+                self.on_action(window, InputState::outdent_block);
+            }
+            self.on_action(window, InputState::on_action_toggle_code_actions);
+        }
+        self.on_action(window, InputState::left);
+        self.on_action(window, InputState::right);
+        self.on_action(window, InputState::select_left);
+        self.on_action(window, InputState::select_right);
+        if self.multi_line {
+            self.on_action(window, InputState::up);
+            self.on_action(window, InputState::down);
+            self.on_action(window, InputState::select_up);
+            self.on_action(window, InputState::select_down);
+            self.on_action(window, InputState::page_up);
+            self.on_action(window, InputState::page_down);
+            self.on_action(window, InputState::on_action_go_to_definition);
+        }
+        self.on_action(window, InputState::select_all);
+        self.on_action(window, InputState::select_to_start_of_line);
+        self.on_action(window, InputState::select_to_end_of_line);
+        self.on_action(window, InputState::select_to_previous_word);
+        self.on_action(window, InputState::select_to_next_word);
+        self.on_action(window, InputState::home);
+        self.on_action(window, InputState::end);
+        self.on_action(window, InputState::move_to_start);
+        self.on_action(window, InputState::move_to_end);
+        self.on_action(window, InputState::move_to_previous_word);
+        self.on_action(window, InputState::move_to_next_word);
+        self.on_action(window, InputState::select_to_start);
+        self.on_action(window, InputState::select_to_end);
+        self.on_action(window, InputState::show_character_palette);
+        self.on_action(window, InputState::copy);
+        self.on_action(window, InputState::on_action_search);
+    }
+}
+
+impl IntoElement for InputActions {
+    type Element = Self;
+
+    fn into_element(self) -> Self::Element {
+        self
+    }
+}
+
+impl Element for InputActions {
+    type RequestLayoutState = ();
+    type PrepaintState = ();
+
+    fn id(&self) -> Option<ElementId> {
+        None
+    }
+
+    fn source_location(&self) -> Option<&'static Location<'static>> {
+        None
+    }
+
+    fn request_layout(
+        &mut self,
+        _: Option<&GlobalElementId>,
+        _: Option<&InspectorElementId>,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> (LayoutId, Self::RequestLayoutState) {
+        (self.child.request_layout(window, cx), ())
+    }
+
+    fn prepaint(
+        &mut self,
+        _: Option<&GlobalElementId>,
+        _: Option<&InspectorElementId>,
+        _: Bounds<Pixels>,
+        _: &mut Self::RequestLayoutState,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Self::PrepaintState {
+        self.child.prepaint(window, cx);
+    }
+
+    fn paint(
+        &mut self,
+        _: Option<&GlobalElementId>,
+        _: Option<&InspectorElementId>,
+        _: Bounds<Pixels>,
+        _: &mut Self::RequestLayoutState,
+        _: &mut Self::PrepaintState,
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        if !self.hidden {
+            self.register(window);
+        }
+        self.child.paint(window, cx);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use gpui::{AppContext as _, Context, Entity, Render, TestAppContext, VisualTestContext};
+
+    use super::*;
+    use crate::input::{Backspace, SelectAll};
+
+    struct InputView {
+        state: Entity<InputState>,
+        disabled: bool,
+    }
+
+    impl Render for InputView {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            div()
+                .w(px(600.))
+                .child(Input::new(&self.state).disabled(self.disabled))
+        }
+    }
+
+    fn build(cx: &mut TestAppContext) -> (Entity<InputView>, &mut VisualTestContext) {
+        cx.update(crate::init);
+        let mut view = None;
+        let (_, cx) = cx.add_window_view(|window, cx| {
+            let state = cx.new(|cx| InputState::new(window, cx).multi_line(true));
+            let input_view = cx.new(|_| InputView {
+                state,
+                disabled: false,
+            });
+            view = Some(input_view.clone());
+            crate::Root::new(input_view, window, cx)
+        });
+        (view.expect("input view"), cx)
+    }
+
+    fn value(view: &Entity<InputView>, cx: &mut VisualTestContext) -> String {
+        view.read_with(cx, |view, cx| view.state.read(cx).value().to_string())
+    }
+
+    #[gpui::test]
+    fn test_input_actions_dispatch(cx: &mut TestAppContext) {
+        let (view, cx) = build(cx);
+        let state = view.read_with(cx, |view, _| view.state.clone());
+        let focus_handle = state.read_with(cx, |state, _| state.focus_handle.clone());
+        state.update_in(cx, |state, window, cx| state.set_value("hello", window, cx));
+        cx.run_until_parked();
+
+        cx.update(|window, cx| {
+            focus_handle.dispatch_action(&SelectAll, window, cx);
+            focus_handle.dispatch_action(&Backspace, window, cx);
+        });
+        assert_eq!(value(&view, cx), "");
+
+        state.update_in(cx, |state, window, cx| state.focus(window, cx));
+        cx.run_until_parked();
+        cx.simulate_input("abc");
+        cx.simulate_keystrokes("backspace");
+        assert_eq!(value(&view, cx), "ab");
+
+        view.update(cx, |view, cx| {
+            view.disabled = true;
+            cx.notify();
+        });
+        cx.run_until_parked();
+        cx.update(|window, cx| {
+            focus_handle.dispatch_action(&SelectAll, window, cx);
+            focus_handle.dispatch_action(&Backspace, window, cx);
+        });
+        assert_eq!(value(&view, cx), "ab");
     }
 }
