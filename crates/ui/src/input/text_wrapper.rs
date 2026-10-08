@@ -241,6 +241,13 @@ impl TextWrapper {
             });
         }
 
+        // Rows before `start_row` are untouched by the splice, so their prefix sums stay valid.
+        let cumulative_before_change = self
+            .cumulative_wrapped_lines
+            .get(start_row)
+            .copied()
+            .unwrap_or(0);
+
         if self.lines.len() == 0 {
             self.lines = new_lines;
         } else {
@@ -249,11 +256,12 @@ impl TextWrapper {
 
         self.text = changed_text.clone();
 
-        // Rebuild prefix sum for O(1) cumulative line count lookups
-        self.cumulative_wrapped_lines.clear();
-        self.cumulative_wrapped_lines.reserve(self.lines.len());
-        let mut cumulative = 0;
-        for line in &self.lines {
+        // Rebuild prefix sum for O(1) cumulative line count lookups, from the changed row down.
+        self.cumulative_wrapped_lines.truncate(start_row);
+        self.cumulative_wrapped_lines
+            .reserve(self.lines.len().saturating_sub(start_row));
+        let mut cumulative = cumulative_before_change;
+        for line in self.lines.get(start_row..).unwrap_or(&[]) {
             self.cumulative_wrapped_lines.push(cumulative);
             cumulative += line.lines_len();
         }
@@ -373,7 +381,9 @@ pub(crate) struct LineLayout {
     /// The soft wrapped lines of this line (Include the first line).
     pub(crate) wrapped_lines: SmallVec<[ShapedLine; 1]>,
     pub(crate) longest_width: Pixels,
-    pub(crate) whitespace_indicators: Option<WhitespaceIndicators>,
+    /// Boxed because each `ShapedLine` carries a large inline decoration run
+    /// buffer, and every visible line's layout is built and moved each frame.
+    pub(crate) whitespace_indicators: Option<Box<WhitespaceIndicators>>,
     /// Whitespace indicators: (line_index, x_position, is_tab)
     pub(crate) whitespace_chars: Vec<(usize, Pixels, bool)>,
 }
@@ -791,6 +801,50 @@ mod tests {
     }
 
     #[test]
+    fn test_cumulative_wrapped_lines_follow_edits() {
+        fn wrap_every_8_bytes(line: &str, _wrap_width: Pixels) -> Vec<Boundary> {
+            (8..line.len())
+                .step_by(8)
+                .map(|ix| Boundary {
+                    ix,
+                    next_indent: 0,
+                })
+                .collect()
+        }
+
+        let font = gpui::Font {
+            family: "Arial".into(),
+            weight: FontWeight::default(),
+            style: FontStyle::Normal,
+            features: FontFeatures::default(),
+            fallbacks: None,
+        };
+        let mut wrapper = TextWrapper::new(font.clone(), px(14.), Some(px(100.)));
+        let mut text = Rope::from(
+            "short\na line that wraps into several rows\nmid\n\nanother fairly long line here\nend",
+        );
+        wrapper._update(&text, &(0..text.len()), &text, &mut wrap_every_8_bytes);
+
+        let edits: &[(usize, usize, &str)] = &[
+            (0, 0, "x"),
+            (12, 12, "\n"),
+            (20, 30, ""),
+            (40, 40, "inserted text that is long enough to wrap\nand a new line"),
+            (0, 15, "a\nb\nc"),
+        ];
+        for (start, end, new_text) in edits {
+            let range = (*start).min(text.len())..(*end).min(text.len());
+            text.replace(range.clone(), new_text);
+            wrapper._update(&text, &range, &Rope::from(*new_text), &mut wrap_every_8_bytes);
+
+            let mut fresh = TextWrapper::new(font.clone(), px(14.), Some(px(100.)));
+            fresh._update(&text, &(0..text.len()), &text, &mut wrap_every_8_bytes);
+            assert_eq!(wrapper.cumulative_wrapped_lines, fresh.cumulative_wrapped_lines);
+            assert_eq!(wrapper.soft_lines, fresh.soft_lines);
+        }
+    }
+
+    #[test]
     fn test_line_layout() {
         let mut line_layout = LineLayout::new();
 
@@ -838,6 +892,8 @@ mod tests {
                 wrapped_lines: vec![0..22],
             },
         ];
+        wrapper.cumulative_wrapped_lines = vec![0, 1, 3, 6];
+        wrapper.soft_lines = 7;
 
         assert_eq!(
             wrapper.offset_to_display_point(12),
