@@ -1,0 +1,163 @@
+{
+  "status": "Dependency coherence qualified through actual Fincode consumers; final component PR review/merge pending.",
+  "component_base": "76fd0fa0d05904755221d32cdb29410633e164ed",
+  "component_source": "dbdb1403552a05ec264e4b536f1858c33ce094db",
+  "target_gpui": "861e0d8570cb179c1cb357d770cc58530c2dd312",
+  "fincode_checked_base": "fcca20c153024edaec4ac52e02a4d6e8039fc7e1",
+  "scope": "Four exact root GPUI pins and root lock; all component library Rust bytes unchanged from component base, prior caret fix preserved. Existing independent story improvement preserved. Example lock unchanged.",
+  "checks": {
+    "consumer-production-check": {
+      "command": [
+        "cargo",
+        "check",
+        "--locked",
+        "-p",
+        "chat",
+        "-p",
+        "editor",
+        "-p",
+        "workspace",
+        "--lib",
+        "-q",
+        "--message-format=short"
+      ],
+      "cwd": "/workspace/fincode-gpui",
+      "deadline_seconds": 900,
+      "started_unix": 1791493647.796572,
+      "pid": 160413,
+      "timed_out": false,
+      "exit_code": 0,
+      "elapsed_seconds": 68.53651595115662,
+      "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "original-registry-native-ui-build": {
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "-p",
+        "ui",
+        "--lib",
+        "--no-run",
+        "-q",
+        "--message-format=json"
+      ],
+      "cwd": "/workspace/fincode-gpui",
+      "deadline_seconds": 900,
+      "started_unix": 1791494547.3837535,
+      "pid": 161738,
+      "timed_out": false,
+      "exit_code": 0,
+      "elapsed_seconds": 0.4147772789001465,
+      "log_sha256": "cf763f85f034181cae8ef5bc8c9a76fadd5818518bd171918444f990192961fe"
+    },
+    "consumer-strict-clippy": {
+      "command": [
+        "env",
+        "CARGO_BUILD_WARNINGS=deny",
+        "cargo",
+        "clippy",
+        "--locked",
+        "-p",
+        "ui",
+        "-p",
+        "gpui-component",
+        "--lib",
+        "-q",
+        "--message-format=short"
+      ],
+      "cwd": "/workspace/fincode-gpui",
+      "deadline_seconds": 900,
+      "started_unix": 1791494583.854407,
+      "pid": 161808,
+      "timed_out": false,
+      "exit_code": 0,
+      "elapsed_seconds": 12.910884380340576,
+      "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "source-guards": {
+      "command": [
+        "bash",
+        "-c",
+        "set -e; ./scripts/check-workspace-deps.sh; ./scripts/check-file-size-ratchet.sh; ./scripts/check-gpui-tokio-boundaries.sh; git diff --check"
+      ],
+      "cwd": "/workspace/fincode-gpui",
+      "deadline_seconds": 180,
+      "started_unix": 1791494585.138196,
+      "pid": 161965,
+      "timed_out": false,
+      "exit_code": 0,
+      "elapsed_seconds": 0.9658586978912354,
+      "log_sha256": "cf261ac1b64dfd41ddf05d08bbf7ec158114af6690d654c80f40ee5efcb4dbd6"
+    },
+    "original-registry-component-locked-metadata": {
+      "command": [
+        "cargo",
+        "metadata",
+        "--locked",
+        "--offline",
+        "--format-version",
+        "1",
+        "--filter-platform",
+        "x86_64-unknown-linux-gnu"
+      ],
+      "cwd": "/workspace/gpui-component-adoption",
+      "deadline_seconds": 180,
+      "started_unix": 1791494497.5657277,
+      "pid": 161718,
+      "timed_out": false,
+      "exit_code": 0,
+      "elapsed_seconds": 0.4147629737854004,
+      "log_sha256": "75f72fa4842b5455f3335367db4039e1e1bc87f4bae8d9a7ab045073fd25cb96"
+    }
+  },
+  "native_ui": {
+    "binary": "/workspace/fincode-gpui/target/debug/deps/ui-c05a182cde4b3d73",
+    "binary_sha256": "c2acec1328b8776f69dc5c96625f2085b724f4082736fe4bae13f2a33c131eb9",
+    "tests": [
+      [
+        "overlay-off",
+        "a_scope_registers_while_it_renders_and_releases_when_it_stops",
+        "0"
+      ],
+      [
+        "overlay-on",
+        "a_scope_registers_while_it_renders_and_releases_when_it_stops",
+        "1"
+      ],
+      [
+        "census",
+        "registered_census_samplers_run_in_order_and_replace_by_name",
+        "1"
+      ],
+      [
+        "marquee",
+        "a_row_moving_under_a_parked_pointer_cancels_the_scroll",
+        "1"
+      ]
+    ],
+    "each_passes": true,
+    "scope": "Native controlled fake-platform programmatic semantic checks. No installed app or physical GPU."
+  },
+  "locks": {
+    "fincode": {
+      "registry_records_unchanged": true,
+      "lock_sha256": "503c607f2a56a9bda3a469cf8900433a38df20c0cbae365da574316d78dd232a",
+      "manifest_sha256": "a58c57609a8e223912a76110ae7d830a4f4207944db662ddf125e5fc6114ab69"
+    },
+    "component": {
+      "registry_records_unchanged": true,
+      "lock_sha256": "ca20386ebef5fb9f5178330dc39f829d1929d7dc99912a2e432f0bc0d7b5f5f2",
+      "manifest_sha256": "5b9603d629962a8765bf7127abe24154c59015a744f4e9bfbff10de412ebbee7"
+    },
+    "lock_method": "Cargo update ran and regenerated canonical alternative edges; reapply original semver-compatible registry records after regeneration, then real locked metadata/native builds validate and preserve them. Every rejected result retained. No registry version/checksum/dependency record change in final candidates."
+  },
+  "adverse_results": "Offline Cargo updates downgraded unrelated Fincode registry packages and selected compatible alternate edges. Rejected/discarded first UI build and raw locks/receipts retained. Package manifests verify both edge choices valid; mistaken invalid-edge interpretation and temporary policy are explicitly rejected. Final locks preserve every original registry record after Cargo regeneration and reapplication, validated by real locked metadata/native builds. No performance gate or profile sample changed.",
+  "included_atlas_checks": "Five native model contracts from the already merged independent atlas retirement pass. No renderer hardware or app GPU/cache gain established.",
+  "archive": {
+    "sha256": "7695898bcb64d11f746a2d12b423962b31b9ff457c06f268189c8e5c2787c1f4",
+    "bytes": 1549003,
+    "members": 75
+  },
+  "limits": "Scoped consumer compile and UI/component library Clippy; native controlled UI contracts. Full component/story suite and native macOS/Windows/physical renderer unexecuted. No whole-app performance claim."
+}
