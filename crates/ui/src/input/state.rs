@@ -661,6 +661,12 @@ impl InputState {
                             blink_cursor.start(cx);
                         });
                     }
+                } else {
+                    // A focused input in a background window would otherwise
+                    // wake and redraw the window twice a second indefinitely.
+                    input.blink_cursor.update(cx, |blink_cursor, cx| {
+                        blink_cursor.hold_visible(cx);
+                    });
                 }
             }),
             cx.on_focus(&focus_handle, window, Self::on_focus),
