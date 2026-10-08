@@ -1,0 +1,297 @@
+{
+  "component_base": "94ca9f558094e2dfd2fe6e5cf6b521306da18fc8",
+  "component_head": "448a7750eca907a225bb5ebf8250fa96376b0957",
+  "gpui_sha": "33439ed70c2a38e7371fac721c26582de3f784f2",
+  "fincode_base": "0b61797e700e6107343bc7221ee0176617f120d0",
+  "scope": "Align component pins for Fincode adoption and clear a canceled caret pause on window hold.",
+  "preparation_limit": "Initial unsupported-GPUI adapter build and offline Story resolver failure retained. Unrelated registry downgrade results rejected. A native cursor adapter compiles the exact complete production module against the real Cargo-built GPUI test-support rlib; full production consumers checked separately.",
+  "checks": {
+    "ui-marquee-movement-contract-receipt": {
+      "command": [
+        "/workspace/fincode-gpui/target/debug/deps/ui-e1819b3df197ebab",
+        "a_row_moving_under_a_parked_pointer_cancels_the_scroll",
+        "--nocapture",
+        "--test-threads=1"
+      ],
+      "cwd": "/workspace/fincode-gpui",
+      "deadline_seconds": 60,
+      "started_unix": 1791488603.0125399,
+      "pid": 80210,
+      "timed_out": false,
+      "exit_code": 0,
+      "elapsed_seconds": 0.009038448333740234,
+      "log_sha256": "5fea70e324ad036e0710af99347659c9e1987f6a0b36f2559635fc254c4c1d74"
+    },
+    "cursor-before-supported-build-receipt": {
+      "command": [
+        "rustc",
+        "--edition",
+        "2024",
+        "--test",
+        "cursor-adapter.rs",
+        "--extern",
+        "gpui=/workspace/scratch/gpui-nested-loop/candidate-workspace/target/debug/deps/libgpui-6edd40265ad5b403.rlib",
+        "-L",
+        "dependency=/workspace/scratch/gpui-nested-loop/candidate-workspace/target/debug/deps",
+        "-L",
+        "native=/workspace/.fincode-tools/native/usr/lib/x86_64-linux-gnu",
+        "-o",
+        "cursor-before-test"
+      ],
+      "cwd": "/workspace/scratch/gpui-adoption-loop",
+      "deadline_seconds": 240,
+      "started_unix": 1791488094.9078834,
+      "pid": 54652,
+      "timed_out": false,
+      "exit_code": 0,
+      "elapsed_seconds": 0.42609333992004395,
+      "log_sha256": "c5654b0e9295ec2a0a309d024968690a2331fa7f2cfbd798c3d85fe96fc839c3"
+    },
+    "ui-integration-test-build-receipt": {
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "-p",
+        "ui",
+        "--lib",
+        "--no-run",
+        "-q",
+        "--message-format=short"
+      ],
+      "cwd": "/workspace/fincode-gpui",
+      "deadline_seconds": 1800,
+      "started_unix": 1791488276.0889795,
+      "pid": 54992,
+      "timed_out": false,
+      "exit_code": 0,
+      "elapsed_seconds": 167.9059820175171,
+      "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "ui-census-contract-receipt": {
+      "command": [
+        "/workspace/fincode-gpui/target/debug/deps/ui-e1819b3df197ebab",
+        "registered_census_samplers_run_in_order_and_replace_by_name",
+        "--nocapture",
+        "--test-threads=1"
+      ],
+      "cwd": "/workspace/fincode-gpui",
+      "deadline_seconds": 60,
+      "started_unix": 1791488602.9697409,
+      "pid": 80205,
+      "timed_out": false,
+      "exit_code": 0,
+      "elapsed_seconds": 0.004363298416137695,
+      "log_sha256": "089b4f9bc07a93d4cff128102c507f0099fff13e57e6bc51a5a01ea01380d144"
+    },
+    "cursor-paused-before-test-receipt": {
+      "command": [
+        "./cursor-before-test",
+        "holding_a_paused_cursor_resumes_after_reactivation",
+        "--nocapture",
+        "--test-threads=1"
+      ],
+      "cwd": "/workspace/scratch/gpui-adoption-loop",
+      "deadline_seconds": 60,
+      "started_unix": 1791488106.8705442,
+      "pid": 54687,
+      "timed_out": false,
+      "exit_code": 101,
+      "elapsed_seconds": 0.00354766845703125,
+      "log_sha256": "6116b330eccbbf1284023e5bf691a94545cb86e4f0e35d50ddca4713328d9ded"
+    },
+    "ui-overlay-retention-off-receipt": {
+      "command": [
+        "/workspace/fincode-gpui/target/debug/deps/ui-e1819b3df197ebab",
+        "a_scope_registers_while_it_renders_and_releases_when_it_stops",
+        "--nocapture",
+        "--test-threads=1"
+      ],
+      "cwd": "/workspace/fincode-gpui",
+      "deadline_seconds": 60,
+      "started_unix": 1791488602.8548672,
+      "pid": 80192,
+      "timed_out": false,
+      "exit_code": 0,
+      "elapsed_seconds": 0.015558481216430664,
+      "log_sha256": "8c45acfa7ff26312ae5990b4e6c3a7ae6a32256df74322b52134ec01131f65d5"
+    },
+    "cursor-after-build-receipt": {
+      "command": [
+        "rustc",
+        "--edition",
+        "2024",
+        "--test",
+        "cursor-after-adapter.rs",
+        "--extern",
+        "gpui=/workspace/scratch/gpui-nested-loop/candidate-workspace/target/debug/deps/libgpui-6edd40265ad5b403.rlib",
+        "-L",
+        "dependency=/workspace/scratch/gpui-nested-loop/candidate-workspace/target/debug/deps",
+        "-L",
+        "native=/workspace/.fincode-tools/native/usr/lib/x86_64-linux-gnu",
+        "-o",
+        "cursor-after-test"
+      ],
+      "cwd": "/workspace/scratch/gpui-adoption-loop",
+      "deadline_seconds": 240,
+      "started_unix": 1791488121.8360734,
+      "pid": 54706,
+      "timed_out": false,
+      "exit_code": 0,
+      "elapsed_seconds": 0.3177664279937744,
+      "log_sha256": "917aeefed5d8f4117cdf6a9074cb0a22079218382e7b3fa363e2d970aab41f2d"
+    },
+    "cursor-running-before-test-receipt": {
+      "command": [
+        "./cursor-before-test",
+        "holding_the_cursor_visible_stops_the_blink_timer",
+        "--nocapture",
+        "--test-threads=1"
+      ],
+      "cwd": "/workspace/scratch/gpui-adoption-loop",
+      "deadline_seconds": 60,
+      "started_unix": 1791488107.2582061,
+      "pid": 54693,
+      "timed_out": false,
+      "exit_code": 0,
+      "elapsed_seconds": 0.003425121307373047,
+      "log_sha256": "789d93e2494cb7a4923a3b554ee05351b0380721fd6f798a745831c63ccf8d6b"
+    },
+    "consumer-strict-clippy-receipt": {
+      "command": [
+        "env",
+        "CARGO_BUILD_WARNINGS=deny",
+        "cargo",
+        "clippy",
+        "--locked",
+        "-p",
+        "ui",
+        "-p",
+        "gpui-component",
+        "--lib",
+        "-q",
+        "--message-format=short"
+      ],
+      "cwd": "/workspace/fincode-gpui",
+      "deadline_seconds": 900,
+      "started_unix": 1791488603.4157047,
+      "pid": 80258,
+      "timed_out": false,
+      "exit_code": 0,
+      "elapsed_seconds": 31.93386960029602,
+      "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "ui-overlay-retention-on-receipt": {
+      "command": [
+        "/workspace/fincode-gpui/target/debug/deps/ui-e1819b3df197ebab",
+        "a_scope_registers_while_it_renders_and_releases_when_it_stops",
+        "--nocapture",
+        "--test-threads=1"
+      ],
+      "cwd": "/workspace/fincode-gpui",
+      "deadline_seconds": 60,
+      "started_unix": 1791488602.905109,
+      "pid": 80200,
+      "timed_out": false,
+      "exit_code": 0,
+      "elapsed_seconds": 0.007655143737792969,
+      "log_sha256": "15e1adcf4015dade3e24168b360a314abc94ea326a11fc14f4c7159d82a896d3"
+    },
+    "cursor-running-after-test-receipt": {
+      "command": [
+        "./cursor-after-test",
+        "holding_the_cursor_visible_stops_the_blink_timer",
+        "--nocapture",
+        "--test-threads=1"
+      ],
+      "cwd": "/workspace/scratch/gpui-adoption-loop",
+      "deadline_seconds": 60,
+      "started_unix": 1791488148.7078674,
+      "pid": 54734,
+      "timed_out": false,
+      "exit_code": 0,
+      "elapsed_seconds": 0.0034377574920654297,
+      "log_sha256": "789d93e2494cb7a4923a3b554ee05351b0380721fd6f798a745831c63ccf8d6b"
+    },
+    "cursor-paused-after-test-receipt": {
+      "command": [
+        "./cursor-after-test",
+        "holding_a_paused_cursor_resumes_after_reactivation",
+        "--nocapture",
+        "--test-threads=1"
+      ],
+      "cwd": "/workspace/scratch/gpui-adoption-loop",
+      "deadline_seconds": 60,
+      "started_unix": 1791488148.6990414,
+      "pid": 54732,
+      "timed_out": false,
+      "exit_code": 0,
+      "elapsed_seconds": 0.007534027099609375,
+      "log_sha256": "4311e238ec786085856fe14688f91517784729a8fe49d8aa35b06431e6ff2666"
+    },
+    "coherent-consumer-check-receipt": {
+      "command": [
+        "cargo",
+        "check",
+        "--locked",
+        "-p",
+        "chat",
+        "-p",
+        "editor",
+        "-p",
+        "workspace",
+        "--lib",
+        "-q",
+        "--message-format=short"
+      ],
+      "cwd": "/workspace/fincode-gpui",
+      "deadline_seconds": 1800,
+      "started_unix": 1791488149.4999325,
+      "pid": 54759,
+      "timed_out": false,
+      "exit_code": 0,
+      "elapsed_seconds": 36.106173038482666,
+      "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  },
+  "native_contract": "Pause -> hold: no further notifications over20 timer intervals, cursor visible. Start -> four intervals: notifications resume; fails before, passes after. Existing start/hold/start contract also passes.",
+  "coverage_limits": [
+    "Linux native component and consumer compile/integration",
+    "No installed app launch or visual verification",
+    "No whole-app/GPU/macOS/Windows performance claim"
+  ],
+  "source_and_artifact_hashes": {
+    "ui-marquee-movement-contract-receipt.json": "ba4913d63ef670e004e84ad529eb2ddff7bd4a1c81858aacd2414150a6da6185",
+    "cursor-before-supported-build-receipt.json": "7b134afc2b93c262d56918dca749f0d991578a7cd6ce1ac801a3b2027404455a",
+    "cursor-adapter.rs": "f92dea5452f30f25a0fc3b1cce37723d4948826bafbbdcb969e1ecd9faa945d5",
+    "ui-integration-test-build-receipt.json": "5e68649633e01dd19bea35bc76a06dea72af4ac88ffaf63c81170819da6e8e53",
+    "ui-test-binary.json": "ef6e17d8960828592a5f2c2b7a260c76f40c08ae7ea39ca57248263b8e777724",
+    "ui-census-contract-receipt.json": "c174b415257fa21e2dd9f4afab5e6693b5d8545cb8446f296f5a81cff52e13bb",
+    "cursor-paused-before-test-receipt.json": "1f99384e89389e7b61b26a6f43408a8b2905ec7674354e407d9405864912c0e7",
+    "ui-overlay-retention-off-receipt.json": "7aba258b8c615a91a9c7120a73c396cab52e3b768ed1b53c688e19b507850396",
+    "cursor-after-build-receipt.json": "2a7f9b4146fc3b9248c459a34348804abc4cec08faf345d2cda03bf16cc07f0e",
+    "blink-cursor-after.rs": "277366db57d998e4d6df2563bb054cab3f0b326917483555643cc5fa2e8a6283",
+    "consumer-production-check-receipt.json": "68c9b205ea0dc57d728fc1a39bd24462826434aa6ce485c9dc0f8a95be960c3e",
+    "cursor-before-build-receipt.json": "b75d98dc79b4188cd0f50d5752b4d832a7ce2f6c3d8f633ad1363dd16b55c789",
+    "cursor-running-before-test-receipt.json": "fa88ec96bb0736c42ac2cd4629ff6d19206465c6af0c1c99bb8d6b611daa5550",
+    "adoption-policy.json": "429de4158c0b149b64011ede9f97a2e3ae70eeddaf27f2441e33a72d70e8d8e3",
+    "consumer-strict-clippy-receipt.json": "abee3258e774b94ffe7318b2accc6938d3a98320eb2f50d8cdfe67ba479ab9e9",
+    "supervise.py": "bc5933c7a5e3542727fd6c5b84f4aa0362cd112bd38036a1de35320c6f9e9fcd",
+    "cursor-after-adapter.rs": "c5611f6758d4f7ca2d23f4f1c49b8047d57c9d656087cbf026902308869e5f82",
+    "component-regenerate-lock-online-receipt.json": "431286fc744368446bc2b5dba2ecf04aebfd4a07ed3f32ae35751a66df746c77",
+    "locked-metadata-preserve-versions-receipt.json": "a9662e44519fdd46dc3f419aa41f09cf355c3626822e061af46bc23a272ae77e",
+    "ui-overlay-retention-on-receipt.json": "07d2efc9d6e098a564644782451a44821bed8f6a67d8c5fcdece565c5930670b",
+    "component-regenerate-lock-receipt.json": "de16c80c54e0e9105d1e582bbfd1d8d50e4392fc743471b2b9c723d63a95e74a",
+    "final-candidate-lock-validation.json": "737b1d9f2747a51d80a901f7dfa85401b2ef14aaf085226c94b262f192f0c712",
+    "cursor-running-after-test-receipt.json": "0088cba4ae41e83c665db84ed982d4001b28a4002b04e837d27109608335e310",
+    "cursor-paused-after-test-receipt.json": "61caccf17e9a7545c8845deb48a3c266c2df5b909b63d9165827b50f94d2ed38",
+    "source-guards-receipt.json": "ee9ed8776309e0cae0d8229af7c405ef145eddca15d9059d6d5cebc17fc9f2bc",
+    "coherent-consumer-check-receipt.json": "9eb76f7fd5c4c0a4fd0201738b7a78550e1f49bd5c699b1d74aceed51d47d6b9",
+    "coherent-lock-validation.json": "485bb2accf6f08a6f858ad9794f90c20f46bcd6497d4b24aad8ee6a570fc486a",
+    "fincode-coherent-lock-receipt.json": "71f90f61c97d6d479fb5db546b62e4b7289429ebc1b869bf1a925e644e16a847",
+    "cursor-gpui-support-build-receipt.json": "deb38221ee2bbf766f7b369f4701b387e6f99d24107d41a7457c50640d25c6ad",
+    "blink-cursor-regression-before.rs": "58baae72b7e8e1baa6114d91190d929c32fb2d9eb3b8b1cdd4cb199287d9f6b1",
+    "initial-lock-drift.json": "bc97fd2b1935475976d3c1a4450da773ad21622f4e722e5c749f8019649503e5",
+    "regenerate-lock-receipt.json": "43dbbbeea24e411351b32963b84803e725dc25364ad8ccbbc4eb608c238701e5"
+  }
+}
