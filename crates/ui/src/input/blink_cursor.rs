@@ -45,6 +45,16 @@ impl BlinkCursor {
         cx.notify();
     }
 
+    /// Stop blinking and keep the cursor drawn until the next `start`.
+    pub fn hold_visible(&mut self, cx: &mut Context<Self>) {
+        self.next_epoch();
+        self._task = Task::ready(());
+        if !self.visible {
+            self.visible = true;
+            cx.notify();
+        }
+    }
+
     fn next_epoch(&mut self) -> usize {
         self.epoch += 1;
         self.epoch
@@ -106,5 +116,48 @@ impl BlinkCursor {
                 });
             }
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{BlinkCursor, INTERVAL};
+    use gpui::{AppContext as _, TestAppContext};
+    use std::{cell::Cell, rc::Rc};
+
+    #[gpui::test]
+    fn holding_the_cursor_visible_stops_the_blink_timer(cx: &mut TestAppContext) {
+        let cursor = cx.new(|_| BlinkCursor::new());
+        let notifications = Rc::new(Cell::new(0));
+        let _subscription = cx.update({
+            let notifications = notifications.clone();
+            |cx| {
+                cx.observe(&cursor, move |_, _| {
+                    notifications.set(notifications.get() + 1)
+                })
+            }
+        });
+
+        cursor.update(cx, |cursor, cx| cursor.start(cx));
+        cx.executor().advance_clock(INTERVAL * 4);
+        cx.run_until_parked();
+        assert!(notifications.get() >= 4, "the cursor blinks while running");
+
+        cursor.update(cx, |cursor, cx| cursor.hold_visible(cx));
+        cx.run_until_parked();
+        let held_at = notifications.get();
+        cx.executor().advance_clock(INTERVAL * 20);
+        cx.run_until_parked();
+        assert_eq!(
+            notifications.get(),
+            held_at,
+            "a held cursor schedules no blinks"
+        );
+        assert!(cursor.read_with(cx, |cursor, _| cursor.visible()));
+
+        cursor.update(cx, |cursor, cx| cursor.start(cx));
+        cx.executor().advance_clock(INTERVAL * 4);
+        cx.run_until_parked();
+        assert!(notifications.get() > held_at, "start resumes blinking");
     }
 }
