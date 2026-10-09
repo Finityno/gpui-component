@@ -674,7 +674,7 @@ impl InputState {
         ];
 
         let text_style = window.text_style();
-        let mouse_context_menu = MouseContextMenu::new(cx.entity(), window, cx);
+        let mouse_context_menu = MouseContextMenu::new(cx.weak_entity(), window, cx);
 
         Self {
             focus_handle: focus_handle.clone(),
