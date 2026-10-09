@@ -593,6 +593,16 @@ mod tests {
     }
 
     #[gpui::test]
+    fn test_dropped_input_state_is_released(cx: &mut TestAppContext) {
+        let (_view, cx) = build(cx);
+        let state = cx.update(|window, cx| cx.new(|cx| InputState::new(window, cx)));
+        let weak_state = state.downgrade();
+        drop(state);
+        cx.run_until_parked();
+        assert!(weak_state.upgrade().is_none());
+    }
+
+    #[gpui::test]
     fn test_input_actions_dispatch(cx: &mut TestAppContext) {
         let (view, cx) = build(cx);
         let state = view.read_with(cx, |view, _| view.state.clone());

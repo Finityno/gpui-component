@@ -1,7 +1,7 @@
 use gpui::{
     App, AppContext as _, Context, DismissEvent, Entity, IntoElement, MouseDownEvent,
-    ParentElement as _, Pixels, Point, Render, Styled, Subscription, Window, anchored, deferred,
-    div, prelude::FluentBuilder as _, px,
+    ParentElement as _, Pixels, Point, Render, Styled, Subscription, WeakEntity, Window, anchored,
+    deferred, div, prelude::FluentBuilder as _, px,
 };
 use rust_i18n::t;
 
@@ -13,7 +13,9 @@ use crate::{
 
 /// Context menu for mouse right clicks.
 pub(crate) struct MouseContextMenu {
-    editor: Entity<InputState>,
+    /// Weak because the editor owns this menu: a strong handle back made a
+    /// cycle that kept every input, its text and its menu alive forever.
+    editor: WeakEntity<InputState>,
     menu: Entity<PopupMenu>,
     mouse_position: Point<Pixels>,
     open: bool,
@@ -89,7 +91,7 @@ impl InputState {
 
 impl MouseContextMenu {
     pub(crate) fn new(
-        editor: Entity<InputState>,
+        editor: WeakEntity<InputState>,
         window: &mut Window,
         cx: &mut App,
     ) -> Entity<Self> {
@@ -121,9 +123,11 @@ impl MouseContextMenu {
     pub(crate) fn close(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.open = false;
         cx.notify();
-        self.editor.update(cx, |this, cx| {
-            this.focus(window, cx);
-        });
+        if let Some(editor) = self.editor.upgrade() {
+            editor.update(cx, |this, cx| {
+                this.focus(window, cx);
+            });
+        }
     }
 }
 
