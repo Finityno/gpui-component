@@ -27,10 +27,10 @@ gpui-component-macros = { path = "crates/macros", version = "0.5.1" }
 gpui-component-assets = { path = "crates/assets", version = "0.5.1" }
 story = { path = "crates/story" }
 
-gpui = { git = "https://github.com/Finityno/zed.git", rev = "451832642218b5aa1f84d10529b3baca4ab3a319" }
-gpui_platform = { git = "https://github.com/Finityno/zed.git", rev = "451832642218b5aa1f84d10529b3baca4ab3a319", features = ["font-kit", "x11", "wayland", "runtime_shaders"] }
-gpui_macros = { git = "https://github.com/Finityno/zed.git", rev = "451832642218b5aa1f84d10529b3baca4ab3a319" }
-sum-tree = { git = "https://github.com/Finityno/zed.git", rev = "451832642218b5aa1f84d10529b3baca4ab3a319", package = "sum_tree" }
+gpui = { git = "https://github.com/Finityno/zed.git", rev = "085d2c854af8d69edfdf13df44af7dc3fca4add1" }
+gpui_platform = { git = "https://github.com/Finityno/zed.git", rev = "085d2c854af8d69edfdf13df44af7dc3fca4add1", features = ["font-kit", "x11", "wayland", "runtime_shaders"] }
+gpui_macros = { git = "https://github.com/Finityno/zed.git", rev = "085d2c854af8d69edfdf13df44af7dc3fca4add1" }
+sum-tree = { git = "https://github.com/Finityno/zed.git", rev = "085d2c854af8d69edfdf13df44af7dc3fca4add1", package = "sum_tree" }
 # reqwest = { version = "0.12.15-zed", package = "zed-reqwest" }
 reqwest = { git = "https://github.com/zed-industries/reqwest.git", rev = "c15662463bda39148ba154100dd44d3fba5873a4", default-features = false, features = [
     "charset",
