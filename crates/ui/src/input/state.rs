@@ -574,6 +574,7 @@ pub struct InputState {
     pub(super) pattern: Option<regex::Regex>,
     pub(super) validate: Option<Box<dyn Fn(&str, &mut Context<Self>) -> bool + 'static>>,
     pub(crate) scroll_handle: ScrollHandle,
+    pub(super) scroll_bounce: gpui::ScrollBounce,
     /// The deferred scroll offset to apply on next layout.
     pub(crate) deferred_scroll_offset: Option<Point<Pixels>>,
     /// The size of the scrollable content.
@@ -703,6 +704,7 @@ impl InputState {
             last_selected_range: None,
             last_cursor: None,
             scroll_handle: ScrollHandle::new(),
+            scroll_bounce: gpui::ScrollBounce::default(),
             scroll_size: gpui::size(px(0.), px(0.)),
             deferred_scroll_offset: None,
             scroll_chain: ScrollChainLatch::default(),
@@ -1760,7 +1762,14 @@ impl InputState {
 
         let old_offset = self.scroll_handle.offset();
         self.update_scroll_offset(Some(old_offset + delta), cx);
-        let scrolled = self.scroll_handle.offset() != old_offset;
+        let after = self.scroll_handle.offset();
+        let scrolled = after != old_offset;
+        let maximum = (self.scroll_size.height - self.input_bounds.size.height).max(px(0.));
+        let impact = if (delta.y > px(0.) && after.y == px(0.))
+            || (delta.y < px(0.) && after.y == -maximum) { delta.y } else { px(0.) };
+        if !self.mode.is_single_line() && maximum > px(0.) {
+            self.scroll_bounce.scroll(impact, self.input_bounds.size.height, event, cx.entity_id(), window, cx);
+        }
 
         // Reaching the end of the text is not on its own a reason to let the
         // scroll through: a gesture that has been moving this input keeps it for
@@ -2343,6 +2352,7 @@ impl InputState {
     }
 
     pub(super) fn on_key_down(&mut self, _: &KeyDownEvent, _: &mut Window, cx: &mut Context<Self>) {
+        if self.scroll_bounce.clear() { cx.notify(); }
         self.pause_blink_cursor(cx);
     }
 
