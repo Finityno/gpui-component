@@ -1224,8 +1224,18 @@ impl Element for TextElement {
 
         // Calculate the scroll offset to keep the cursor in view
 
-        let (cursor_bounds, cursor_scroll_offset, current_row) =
+        let (mut cursor_bounds, cursor_scroll_offset, current_row) =
             self.layout_cursor(&last_layout, scroll_size, &mut bounds, window, cx);
+        let state = self.state.read(cx);
+        let bounce = state.scroll_bounce.offset(
+            cursor_scroll_offset.y,
+            (scroll_size.height - bounds.size.height).max(px(0.)),
+            window, cx,
+        );
+        // Keep the scroll offset clamped for caret tracking and scrollbar geometry;
+        // translate the text, selections and caret together inside the fixed clip.
+        bounds.origin.y += bounce;
+        if let Some(cursor) = cursor_bounds.as_mut() { cursor.origin.y += bounce; }
         last_layout.cursor_bounds = cursor_bounds;
 
         let search_match_paths = self.layout_search_matches(&last_layout, &mut bounds, cx);
