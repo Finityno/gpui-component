@@ -1643,6 +1643,7 @@ impl InputState {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.scroll_bounce.clear() { cx.notify(); }
         // Clear inline completion on any mouse interaction
         self.clear_inline_completion(cx);
 
@@ -1833,6 +1834,7 @@ impl InputState {
         direction: Option<MoveDirection>,
         cx: &mut Context<Self>,
     ) {
+        if self.scroll_bounce.clear() { cx.notify(); }
         let Some(last_layout) = self.last_layout.as_ref() else {
             // Even without layout, set a basic deferred scroll so the first
             // render after a paste scrolls to approximately the right position
@@ -2763,6 +2765,7 @@ impl EntityInputHandler for InputState {
             return;
         }
 
+        if self.scroll_bounce.clear() { cx.notify(); }
         self.pause_blink_cursor(cx);
 
         let range = range_utf16
