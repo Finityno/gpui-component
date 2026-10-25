@@ -121,6 +121,28 @@ pub fn init(cx: &mut App) {
     tree::init(cx);
 }
 
+/// A binding for keystrokes written with the `secondary-` alias (⌘ on macOS,
+/// ctrl elsewhere). `KeyBinding::new` parses only explicit modifiers: the
+/// alias resolves against the host OS, which only the running app knows.
+pub(crate) fn host_key_binding(
+    keystrokes: &str,
+    action: impl gpui::Action,
+    context: Option<&str>,
+    cx: &App,
+) -> Option<gpui::KeyBinding> {
+    let context_predicate = match context.map(gpui::KeyBindingContextPredicate::parse) {
+        Some(Ok(predicate)) => Some(std::rc::Rc::new(predicate)),
+        Some(Err(error)) => {
+            tracing::error!("invalid keybinding context {context:?}: {error}");
+            return None;
+        }
+        None => None,
+    };
+    gpui::KeyBinding::load(keystrokes, Box::new(action), context_predicate, false, None, cx)
+        .inspect_err(|error| tracing::error!("invalid keybinding {keystrokes:?}: {error}"))
+        .ok()
+}
+
 #[inline]
 pub fn locale() -> impl Deref<Target = str> {
     rust_i18n::locale()
@@ -176,5 +198,31 @@ impl Measure {
     pub fn end(self) {
         let duration = self.start.elapsed();
         tracing::trace!("{} in {:?}", self.name, duration);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::actions::Confirm;
+
+    #[gpui::test]
+    fn secondary_bindings_resolve_against_the_host(cx: &mut gpui::TestAppContext) {
+        cx.update(|cx| {
+            let binding = crate::host_key_binding(
+                "secondary-enter",
+                Confirm { secondary: true },
+                Some("List"),
+                cx,
+            )
+            .expect("secondary-enter binds on the host");
+            assert_eq!(
+                binding.keystrokes()[0].inner().modifiers,
+                gpui::Modifiers::secondary_key(cx)
+            );
+            // The components' own init binds these, and used to panic once
+            // `KeyBinding::new` stopped resolving the alias.
+            crate::list::init(cx);
+            crate::select::init(cx);
+        });
     }
 }

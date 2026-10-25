@@ -23,13 +23,14 @@ pub(crate) fn init(cx: &mut App) {
         KeyBinding::new("up", SelectUp, Some(CONTEXT)),
         KeyBinding::new("down", SelectDown, Some(CONTEXT)),
         KeyBinding::new("enter", Confirm { secondary: false }, Some(CONTEXT)),
-        KeyBinding::new(
-            "secondary-enter",
-            Confirm { secondary: true },
-            Some(CONTEXT),
-        ),
         KeyBinding::new("escape", Cancel, Some(CONTEXT)),
-    ])
+    ]);
+    cx.bind_keys(crate::host_key_binding(
+        "secondary-enter",
+        Confirm { secondary: true },
+        Some(CONTEXT),
+        cx,
+    ));
 }
 
 /// A trait for items that can be displayed in a select.
