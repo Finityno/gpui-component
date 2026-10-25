@@ -143,7 +143,7 @@ impl InputState {
     ) {
         // Only what changes here is drawn again: the definition and hover
         // popover lookups notify when their results arrive.
-        if event.modifiers.secondary() {
+        if event.modifiers.secondary(cx) {
             self.handle_hover_definition(offset, window, cx);
         } else {
             if !self.hover_definition.is_empty() {
