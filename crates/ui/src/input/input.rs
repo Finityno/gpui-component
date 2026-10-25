@@ -716,6 +716,10 @@ mod tests {
         /// An overlay drawn after the rest of the window, as menus,
         /// popovers and toasts are.
         deferred_overlay: bool,
+        /// Whether `child` is drawn deferred, after the rest of the window,
+        /// as Fincode's chat panel draws its floating composer over the
+        /// transcript.
+        deferred_child: bool,
     }
 
     impl Render for Shell {
@@ -727,7 +731,13 @@ mod tests {
                 .flex()
                 .flex_col()
                 .child(div().h(px(40.)).child(self.name))
-                .child(self.child.clone())
+                .map(|this| {
+                    if self.deferred_child {
+                        this.child(gpui::deferred(self.child.clone()))
+                    } else {
+                        this.child(self.child.clone())
+                    }
+                })
                 .when(self.deferred_overlay, |this| {
                     this.child(gpui::deferred(div().absolute().size(px(10.)).child("overlay")))
                 })
@@ -758,7 +768,7 @@ mod tests {
     /// around it, as in the app's window.
     #[gpui::test]
     fn test_caret_blink_builds_only_the_input(cx: &mut TestAppContext) {
-        caret_blink_builds_only_the_input(cx, false);
+        caret_blink_builds_only_the_input(cx, PanelShape::Plain);
     }
 
     /// The same, with an overlay deferred in the panel around the composer.
@@ -766,10 +776,26 @@ mod tests {
     fn test_caret_blink_builds_only_the_input_beside_a_deferred_overlay(
         cx: &mut TestAppContext,
     ) {
-        caret_blink_builds_only_the_input(cx, true);
+        caret_blink_builds_only_the_input(cx, PanelShape::DeferredOverlay);
     }
 
-    fn caret_blink_builds_only_the_input(cx: &mut TestAppContext, deferred_overlay: bool) {
+    /// The same, with the composer itself drawn deferred by the panel: the
+    /// caret's reads stay with the composer and the input, so the panel and
+    /// the workspace are drawn again whole, and only the composer is drawn
+    /// again around the input.
+    #[gpui::test]
+    fn test_caret_blink_builds_only_the_input_in_a_deferred_composer(cx: &mut TestAppContext) {
+        caret_blink_builds_only_the_input(cx, PanelShape::DeferredComposer);
+    }
+
+    #[derive(Clone, Copy, PartialEq, Debug)]
+    enum PanelShape {
+        Plain,
+        DeferredOverlay,
+        DeferredComposer,
+    }
+
+    fn caret_blink_builds_only_the_input(cx: &mut TestAppContext, shape: PanelShape) {
         cx.update(crate::init);
         cx.update(|cx| cx.set_view_retention(true));
         let counts: [Rc<Cell<usize>>; 3] = Default::default();
@@ -790,13 +816,15 @@ mod tests {
                 name: "panel",
                 renders: counts[1].clone(),
                 child: composer.into(),
-                deferred_overlay,
+                deferred_overlay: shape == PanelShape::DeferredOverlay,
+                deferred_child: shape == PanelShape::DeferredComposer,
             });
             let workspace = cx.new(|_| Shell {
                 name: "workspace",
                 renders: counts[0].clone(),
                 child: panel.into(),
                 deferred_overlay: false,
+                deferred_child: false,
             });
             crate::Root::new(workspace, window, cx)
         });
@@ -825,8 +853,11 @@ mod tests {
                 .collect();
             assert_eq!(built, vec![0, 0, 0], "blink {blink} built a view around the input: {work:?} {reasons:?}");
             assert_eq!(work.views_rendered, 1, "blink {blink}: {work:?} {reasons:?}");
-            // The root, workspace, panel and composer, drawn again around it.
-            assert_eq!(work.views_spliced, 4, "blink {blink}: {work:?} {reasons:?}");
+            // The root, workspace, panel and composer, drawn again around it;
+            // only the composer when it is deferred, the rest drawn again
+            // whole.
+            let spliced = if shape == PanelShape::DeferredComposer { 1 } else { 4 };
+            assert_eq!(work.views_spliced, spliced, "blink {blink}: {work:?} {reasons:?}");
         }
     }
 }
