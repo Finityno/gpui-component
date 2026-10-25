@@ -638,7 +638,11 @@ impl InputState {
     /// See also: [`Self::multi_line`], [`Self::auto_grow`] to set other mode.
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let focus_handle = cx.focus_handle().tab_stop(true);
-        let blink_cursor = cx.new(|_| BlinkCursor::new());
+        let blink_cursor = cx.new(|cx| {
+            let mut blink_cursor = BlinkCursor::new();
+            blink_cursor.set_suspended(!Self::window_shows_blinking(window), cx);
+            blink_cursor
+        });
         let history = History::new().group_interval(std::time::Duration::from_secs(1));
 
         let _subscriptions = vec![
@@ -653,22 +657,15 @@ impl InputState {
                     cx.notify();
                 }
             }),
-            // Blink the cursor when the window is active, pause when it's not.
+            // Blink the cursor while the window is active and shown, and hold
+            // it still otherwise: a focused input in a background or
+            // minimized window would wake and redraw the window twice a
+            // second indefinitely.
             cx.observe_window_activation(window, |input, window, cx| {
-                if window.is_window_active() {
-                    let focus_handle = input.focus_handle.clone();
-                    if focus_handle.is_focused(window) {
-                        input.blink_cursor.update(cx, |blink_cursor, cx| {
-                            blink_cursor.start(cx);
-                        });
-                    }
-                } else {
-                    // A focused input in a background window would otherwise
-                    // wake and redraw the window twice a second indefinitely.
-                    input.blink_cursor.update(cx, |blink_cursor, cx| {
-                        blink_cursor.hold_visible(cx);
-                    });
-                }
+                input.update_blinking(window, cx);
+            }),
+            cx.observe_window_visibility(window, |input, _, window, cx| {
+                input.update_blinking(window, cx);
             }),
             cx.on_focus(&focus_handle, window, Self::on_focus),
             cx.on_blur(&focus_handle, window, Self::on_blur),
@@ -2319,10 +2316,30 @@ impl InputState {
     }
 
     fn on_focus(&mut self, _: &mut Window, cx: &mut Context<Self>) {
+        // Focused while the window is in the background (restored focus, a
+        // programmatic focus), the cursor is suspended: drawn, and blinking
+        // once the window is activated.
         self.blink_cursor.update(cx, |cursor, cx| {
             cursor.start(cx);
         });
         cx.emit(InputEvent::Focus);
+    }
+
+    /// Whether a focused input in `window` should blink: the window is the
+    /// active one and its frames are shown.
+    fn window_shows_blinking(window: &Window) -> bool {
+        window.is_window_active() && window.is_visible()
+    }
+
+    fn update_blinking(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let shows_blinking = Self::window_shows_blinking(window);
+        let focused = self.focus_handle.is_focused(window);
+        self.blink_cursor.update(cx, |blink_cursor, cx| {
+            blink_cursor.set_suspended(!shows_blinking, cx);
+            if shows_blinking && focused {
+                blink_cursor.start(cx);
+            }
+        });
     }
 
     fn on_blur(&mut self, window: &mut Window, cx: &mut Context<Self>) {

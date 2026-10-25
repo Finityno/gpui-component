@@ -20,6 +20,12 @@ pub(super) const CURSOR_WIDTH: Pixels = px(1.5);
 pub(crate) struct BlinkCursor {
     visible: bool,
     paused: bool,
+    /// Whether the toggle task is running, so that starting again (window
+    /// activation and visibility can both report one return) leaves it be.
+    blinking: bool,
+    /// Whether the window is in the background or hidden: the cursor is
+    /// drawn and held still, with no timer, until resumed.
+    suspended: bool,
     epoch: usize,
 
     _task: Task<()>,
@@ -30,6 +36,8 @@ impl BlinkCursor {
         Self {
             visible: false,
             paused: false,
+            blinking: false,
+            suspended: false,
             epoch: 0,
             _task: Task::ready(()),
         }
@@ -37,11 +45,38 @@ impl BlinkCursor {
 
     /// Start the blinking
     pub fn start(&mut self, cx: &mut Context<Self>) {
-        self.blink(self.epoch, cx);
+        if self.suspended {
+            if !self.visible {
+                self.visible = true;
+                cx.notify();
+            }
+            return;
+        }
+        if self.paused {
+            // The pause timer resumes blinking.
+            self.visible = true;
+            return;
+        }
+        if self.blinking {
+            return;
+        }
+        // Shown at once, then toggled every interval.
+        if !self.visible {
+            self.visible = true;
+            cx.notify();
+        }
+        self.toggle_every_interval(cx);
     }
 
     pub fn stop(&mut self, cx: &mut Context<Self>) {
         self.epoch = 0;
+        // Cancels a pause timer too, which would have cleared `paused`.
+        self._task = Task::ready(());
+        self.paused = false;
+        self.blinking = false;
+        // Drawn while still: a window losing activation blurs its focused
+        // input, whose caret stays drawn in the background window.
+        self.visible = true;
         cx.notify();
     }
 
@@ -49,6 +84,7 @@ impl BlinkCursor {
     pub fn hold_visible(&mut self, cx: &mut Context<Self>) {
         self.next_epoch();
         self._task = Task::ready(());
+        self.blinking = false;
         // Canceling the pause timer must not leave reactivation paused.
         self.paused = false;
         if !self.visible {
@@ -57,26 +93,43 @@ impl BlinkCursor {
         }
     }
 
+    /// Holds the cursor drawn and still while the window is in the
+    /// background or hidden, through any `start` or pause meanwhile; or lets
+    /// the next `start` blink again.
+    pub fn set_suspended(&mut self, suspended: bool, cx: &mut Context<Self>) {
+        self.suspended = suspended;
+        if suspended {
+            self.hold_visible(cx);
+        }
+    }
+
     fn next_epoch(&mut self) -> usize {
         self.epoch += 1;
         self.epoch
     }
 
-    fn blink(&mut self, epoch: usize, cx: &mut Context<Self>) {
-        if self.paused || epoch != self.epoch {
-            self.visible = true;
-            return;
-        }
-
-        self.visible = !self.visible;
-        cx.notify();
-
-        // Schedule the next blink
+    /// Toggles the cursor every [`INTERVAL`] from now, in one task that
+    /// sleeps between toggles: each blink costs one timer wake and one
+    /// notification, and nothing in between.
+    fn toggle_every_interval(&mut self, cx: &mut Context<Self>) {
         let epoch = self.next_epoch();
+        self.blinking = true;
         self._task = cx.spawn(async move |this, cx| {
-            cx.background_executor().timer(INTERVAL).await;
-            if let Some(this) = this.upgrade() {
-                this.update(cx, |this, cx| this.blink(epoch, cx));
+            loop {
+                cx.background_executor().timer(INTERVAL).await;
+                let toggled = this.update(cx, |this, cx| {
+                    if this.paused || this.epoch != epoch {
+                        this.visible = true;
+                        this.blinking = false;
+                        return false;
+                    }
+                    this.visible = !this.visible;
+                    cx.notify();
+                    true
+                });
+                if !matches!(toggled, Ok(true)) {
+                    break;
+                }
             }
         });
     }
@@ -91,7 +144,12 @@ impl BlinkCursor {
     /// After the delay the cursor stays visible for one full blink interval
     /// before toggling, so it doesn't flash off immediately after a text edit.
     pub fn pause(&mut self, cx: &mut Context<Self>) {
+        if self.suspended {
+            self.hold_visible(cx);
+            return;
+        }
         self.paused = true;
+        self.blinking = false;
         self.visible = true;
         cx.notify();
 
@@ -105,16 +163,12 @@ impl BlinkCursor {
                     this.paused = false;
                     // Keep visible and schedule the first toggle after a full
                     // interval so the cursor doesn't disappear right away.
+                    // Visible already (pausing showed it), so nothing changes
+                    // on screen and nothing is notified.
                     this.visible = true;
-                    cx.notify();
-
-                    let epoch = this.next_epoch();
-                    this._task = cx.spawn(async move |this, cx| {
-                        cx.background_executor().timer(INTERVAL).await;
-                        if let Some(this) = this.upgrade() {
-                            this.update(cx, |this, cx| this.blink(epoch, cx));
-                        }
-                    });
+                    if !this.suspended {
+                        this.toggle_every_interval(cx);
+                    }
                 });
             }
         });
@@ -189,5 +243,66 @@ mod tests {
         cx.executor().advance_clock(INTERVAL * 4);
         cx.run_until_parked();
         assert!(notifications.get() > held_at, "reactivation resumes blinking");
+    }
+
+    #[gpui::test]
+    fn blinking_toggles_once_per_interval_and_starting_again_changes_nothing(
+        cx: &mut TestAppContext,
+    ) {
+        let cursor = cx.new(|_| BlinkCursor::new());
+        let notifications = Rc::new(Cell::new(0));
+        let _subscription = cx.update({
+            let notifications = notifications.clone();
+            |cx| {
+                cx.observe(&cursor, move |_, _| {
+                    notifications.set(notifications.get() + 1)
+                })
+            }
+        });
+
+        cursor.update(cx, |cursor, cx| cursor.start(cx));
+        cx.run_until_parked();
+        assert!(cursor.read_with(cx, |cursor, _| cursor.visible()), "shown at once");
+        let started = notifications.get();
+        // Window activation and visibility can both report the same return.
+        cursor.update(cx, |cursor, cx| cursor.start(cx));
+        cx.run_until_parked();
+        assert_eq!(notifications.get(), started, "a second start does not toggle");
+        assert!(cursor.read_with(cx, |cursor, _| cursor.visible()));
+
+        for blink in 1..=6 {
+            cx.executor().advance_clock(INTERVAL);
+            cx.run_until_parked();
+            assert_eq!(notifications.get(), started + blink, "one toggle per interval");
+            assert_eq!(
+                cursor.read_with(cx, |cursor, _| cursor.visible()),
+                blink % 2 == 0
+            );
+        }
+
+        // A focus after a blur shows the cursor at once.
+        cursor.update(cx, |cursor, cx| cursor.stop(cx));
+        assert!(cursor.read_with(cx, |cursor, _| cursor.visible()));
+        cursor.update(cx, |cursor, cx| cursor.start(cx));
+        assert!(cursor.read_with(cx, |cursor, _| cursor.visible()));
+    }
+
+    #[gpui::test]
+    fn stopping_during_a_pause_does_not_leave_the_cursor_paused(cx: &mut TestAppContext) {
+        let cursor = cx.new(|_| BlinkCursor::new());
+        cursor.update(cx, |cursor, cx| {
+            cursor.start(cx);
+            cursor.pause(cx);
+            cursor.stop(cx);
+            cursor.start(cx);
+        });
+        let shown = cursor.read_with(cx, |cursor, _| cursor.visible());
+        cx.executor().advance_clock(INTERVAL);
+        cx.run_until_parked();
+        assert_ne!(
+            cursor.read_with(cx, |cursor, _| cursor.visible()),
+            shown,
+            "blinks after the pause was cut short"
+        );
     }
 }

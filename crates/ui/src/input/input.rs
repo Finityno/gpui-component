@@ -556,6 +556,7 @@ impl Element for InputActions {
 #[cfg(test)]
 mod tests {
     use gpui::{AppContext as _, Context, Entity, Render, TestAppContext, VisualTestContext};
+    use std::{cell::Cell, rc::Rc};
 
     use super::*;
     use crate::input::{Backspace, SelectAll};
@@ -632,5 +633,77 @@ mod tests {
             focus_handle.dispatch_action(&Backspace, window, cx);
         });
         assert_eq!(value(&view, cx), "ab");
+    }
+
+    fn caret_shown(view: &Entity<InputView>, cx: &mut VisualTestContext) -> bool {
+        view.read_with(cx, |view, cx| view.state.read(cx).blink_cursor.read(cx).visible())
+    }
+
+    /// A focused input blinks only while its window is active: focusing it
+    /// in a background window, or the window losing activation, holds the
+    /// caret still with no timer running.
+    #[gpui::test]
+    fn test_caret_blinks_only_in_the_active_window(cx: &mut TestAppContext) {
+        let (view, cx) = build(cx);
+        let state = view.read_with(cx, |view, _| view.state.clone());
+        let blinks = Rc::new(Cell::new(0));
+        let blink_cursor = state.read_with(cx, |state, _| state.blink_cursor.clone());
+        let _subscription = cx.update({
+            let blinks = blinks.clone();
+            |_, cx| cx.observe(&blink_cursor, move |_, _| blinks.set(blinks.get() + 1))
+        });
+        let interval = std::time::Duration::from_millis(500);
+
+        cx.deactivate_window();
+        state.update_in(cx, |state, window, cx| state.focus(window, cx));
+        cx.run_until_parked();
+        let held = blinks.get();
+        cx.executor().advance_clock(interval * 6);
+        cx.run_until_parked();
+        assert_eq!(blinks.get(), held, "no blinking in a background window");
+        assert!(caret_shown(&view, cx), "but the caret is drawn");
+
+        cx.update(|window, _| window.activate_window());
+        cx.run_until_parked();
+        let active = blinks.get();
+        cx.executor().advance_clock(interval * 4);
+        cx.run_until_parked();
+        assert!(blinks.get() >= active + 4, "blinks once activated");
+
+        cx.deactivate_window();
+        let held = blinks.get();
+        cx.executor().advance_clock(interval * 6);
+        cx.run_until_parked();
+        assert!(blinks.get() <= held + 1, "stops when the window is deactivated");
+        assert!(caret_shown(&view, cx), "the caret stays drawn");
+    }
+
+    /// With view retention on, nothing notifies the input when its caret
+    /// blinks: the text element reads the caret as it paints, and that read
+    /// alone must draw the window again, building the input and painting the
+    /// caret's new state.
+    #[gpui::test]
+    fn test_caret_blink_redraws_with_view_retention(cx: &mut TestAppContext) {
+        cx.update(|cx| cx.set_view_retention(true));
+        let (view, cx) = build(cx);
+        let state = view.read_with(cx, |view, _| view.state.clone());
+        cx.update(|window, _| window.activate_window());
+        state.update_in(cx, |state, window, cx| state.focus(window, cx));
+        cx.run_until_parked();
+        let interval = std::time::Duration::from_millis(500);
+
+        for blink in 0..4 {
+            cx.update(|window, _| window.reset_frame_work_stats(false));
+            let shown = caret_shown(&view, cx);
+            cx.executor().advance_clock(interval);
+            cx.run_until_parked();
+            assert_ne!(caret_shown(&view, cx), shown, "blink {blink} toggled");
+            let work = cx.update(|window, _| window.frame_work_stats());
+            assert!(work.frames > 0, "blink {blink} drew no frame: {work:?}");
+            assert!(
+                work.views_rendered > 0,
+                "blink {blink} drew the input again from the last frame, caret and all: {work:?}"
+            );
+        }
     }
 }
