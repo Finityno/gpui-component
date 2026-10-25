@@ -706,4 +706,127 @@ mod tests {
             );
         }
     }
+
+    /// A view that renders `child` and counts its renders, standing in for
+    /// the workspace and chat panel around the composer in an app.
+    struct Shell {
+        name: &'static str,
+        renders: Rc<Cell<usize>>,
+        child: gpui::AnyView,
+        /// An overlay drawn after the rest of the window, as menus,
+        /// popovers and toasts are.
+        deferred_overlay: bool,
+    }
+
+    impl Render for Shell {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            self.renders.set(self.renders.get() + 1);
+            div()
+                .id(self.name)
+                .size_full()
+                .flex()
+                .flex_col()
+                .child(div().h(px(40.)).child(self.name))
+                .child(self.child.clone())
+                .when(self.deferred_overlay, |this| {
+                    this.child(gpui::deferred(div().absolute().size(px(10.)).child("overlay")))
+                })
+        }
+    }
+
+    /// The composer: a view wrapping the input element, as an app's message
+    /// input does, reading the state as it renders.
+    struct Composer {
+        state: Entity<InputState>,
+        renders: Rc<Cell<usize>>,
+    }
+
+    impl Render for Composer {
+        fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+            self.renders.set(self.renders.get() + 1);
+            let empty = self.state.read(cx).value().is_empty();
+            div()
+                .w(px(600.))
+                .relative()
+                .child(Input::new(&self.state).appearance(false))
+                .when(empty, |this| this.child(div().absolute().child("hint")))
+        }
+    }
+
+    /// With view retention on, a blink builds only the input state view, and
+    /// the views around it (composer, chat panel, workspace) are drawn again
+    /// around it, as in the app's window.
+    #[gpui::test]
+    fn test_caret_blink_builds_only_the_input(cx: &mut TestAppContext) {
+        caret_blink_builds_only_the_input(cx, false);
+    }
+
+    /// The same, with an overlay deferred in the panel around the composer.
+    #[gpui::test]
+    fn test_caret_blink_builds_only_the_input_beside_a_deferred_overlay(
+        cx: &mut TestAppContext,
+    ) {
+        caret_blink_builds_only_the_input(cx, true);
+    }
+
+    fn caret_blink_builds_only_the_input(cx: &mut TestAppContext, deferred_overlay: bool) {
+        cx.update(crate::init);
+        cx.update(|cx| cx.set_view_retention(true));
+        let counts: [Rc<Cell<usize>>; 3] = Default::default();
+        let mut state_slot = None;
+        let (_, cx) = cx.add_window_view(|window, cx| {
+            let state = cx.new(|cx| {
+                InputState::new(window, cx)
+                    .auto_grow(1, 15)
+                    .soft_wrap(true)
+                    .placeholder("Do anything")
+            });
+            state_slot = Some(state.clone());
+            let composer = cx.new(|_| Composer {
+                state,
+                renders: counts[2].clone(),
+            });
+            let panel = cx.new(|_| Shell {
+                name: "panel",
+                renders: counts[1].clone(),
+                child: composer.into(),
+                deferred_overlay,
+            });
+            let workspace = cx.new(|_| Shell {
+                name: "workspace",
+                renders: counts[0].clone(),
+                child: panel.into(),
+                deferred_overlay: false,
+            });
+            crate::Root::new(workspace, window, cx)
+        });
+        let state = state_slot.expect("input state");
+        cx.update(|window, _| window.activate_window());
+        state.update_in(cx, |state, window, cx| state.focus(window, cx));
+        cx.run_until_parked();
+        let interval = std::time::Duration::from_millis(500);
+        // Settle: the first frames after focusing build what focus changed.
+        for _ in 0..2 {
+            cx.executor().advance_clock(interval);
+            cx.run_until_parked();
+        }
+
+        for blink in 0..4 {
+            cx.update(|window, _| window.reset_frame_work_stats(false));
+            let before: Vec<usize> = counts.iter().map(|count| count.get()).collect();
+            cx.executor().advance_clock(interval);
+            cx.run_until_parked();
+            let work = cx.update(|window, _| window.frame_work_stats());
+            let reasons = cx.update(|window, _| window.view_rebuild_reasons().to_vec());
+            let built: Vec<usize> = counts
+                .iter()
+                .zip(&before)
+                .map(|(count, before)| count.get() - before)
+                .collect();
+            assert_eq!(built, vec![0, 0, 0], "blink {blink} built a view around the input: {work:?} {reasons:?}");
+            assert_eq!(work.views_rendered, 1, "blink {blink}: {work:?} {reasons:?}");
+            // The root, workspace, panel and composer, drawn again around it.
+            assert_eq!(work.views_spliced, 4, "blink {blink}: {work:?} {reasons:?}");
+        }
+    }
 }
