@@ -475,7 +475,6 @@ impl Scrollbar {
     }
 }
 
-
 #[doc(hidden)]
 pub struct PrepaintState {
     hitbox: Hitbox,

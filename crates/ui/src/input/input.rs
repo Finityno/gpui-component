@@ -494,7 +494,6 @@ impl InputActions {
     }
 }
 
-
 impl Element for InputActions {
     type RequestLayoutState = ();
     type PrepaintState = ();

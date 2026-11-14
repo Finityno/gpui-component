@@ -238,7 +238,6 @@ impl Element for Anchored {
     }
 }
 
-
 /// Which algorithm to use when fitting the anchored element to be inside the window.
 #[allow(dead_code)]
 #[derive(Copy, Clone, PartialEq)]

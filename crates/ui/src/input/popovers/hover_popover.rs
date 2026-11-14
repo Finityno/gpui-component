@@ -132,7 +132,6 @@ impl Popover {
     }
 }
 
-
 pub(crate) struct PopoverLayoutState {
     state: Entity<bool>,
     bounds: Bounds<Pixels>,

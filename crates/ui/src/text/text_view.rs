@@ -144,7 +144,6 @@ impl TextView {
     }
 }
 
-
 pub struct TextViewLayoutState {
     state: Entity<TextViewState>,
     element: AnyElement,

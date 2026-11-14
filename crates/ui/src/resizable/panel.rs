@@ -308,7 +308,6 @@ struct ResizePanelGroupElement {
     axis: Axis,
 }
 
-
 impl Element for ResizePanelGroupElement {
     type RequestLayoutState = ();
     type PrepaintState = ();

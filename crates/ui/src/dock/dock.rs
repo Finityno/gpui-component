@@ -408,7 +408,6 @@ struct DockElement {
     view: Entity<Dock>,
 }
 
-
 impl Element for DockElement {
     type RequestLayoutState = ();
     type PrepaintState = ();

@@ -99,7 +99,6 @@ impl<E: ParentElement + Styled> Styled for ContextMenu<E> {
     }
 }
 
-
 struct ContextMenuSharedState {
     menu_view: Option<Entity<PopupMenu>>,
     open: bool,

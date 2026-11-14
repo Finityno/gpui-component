@@ -35,7 +35,6 @@ impl ScrollableMask {
     }
 }
 
-
 impl Element for ScrollableMask {
     type RequestLayoutState = ();
     type PrepaintState = Hitbox;

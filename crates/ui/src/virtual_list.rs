@@ -332,7 +332,6 @@ pub struct ItemSizeLayout {
     last_layout_bounds: Bounds<Pixels>,
 }
 
-
 impl Element for VirtualList {
     type RequestLayoutState = VirtualListFrameState;
     type PrepaintState = Option<Hitbox>;

@@ -217,7 +217,6 @@ impl Inline {
     }
 }
 
-
 impl Element for Inline {
     type RequestLayoutState = ();
     type PrepaintState = Hitbox;

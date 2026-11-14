@@ -908,7 +908,6 @@ impl PrepaintState {
     }
 }
 
-
 impl Element for TextElement {
     type RequestLayoutState = ();
     type PrepaintState = PrepaintState;
