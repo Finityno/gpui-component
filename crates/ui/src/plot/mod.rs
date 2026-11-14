@@ -34,7 +34,7 @@ where
     point(x, y) + origin
 }
 
-pub fn polygon<T>(points: &[Point<T>], bounds: &Bounds<Pixels>) -> Option<Path<Pixels>>
+pub fn polygon<T>(points: &[Point<T>], bounds: &Bounds<Pixels>) -> Option<Path>
 where
     T: Default + Clone + Copy + Debug + Into<f32> + PartialEq,
 {

@@ -114,7 +114,7 @@ impl TextElement {
         last_layout: &LastLayout,
         text_style: &TextStyle,
         window: &mut Window,
-    ) -> Option<Path<Pixels>> {
+    ) -> Option<Path> {
         if !state.mode.has_indent_guides() {
             return None;
         }

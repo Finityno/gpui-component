@@ -2,7 +2,7 @@
 //! https://github.com/zed-industries/zed/blob/b06f4088a3565c5e30663106ff79c1ced645d87a/crates/gpui/src/elements/anchored.rs
 use gpui::{
     AnyElement, App, Axis, Bounds, Display, Edges, Element, GlobalElementId, Half,
-    InspectorElementId, IntoElement, LayoutId, ParentElement, Pixels, Point, Position, Size, Style,
+    InspectorElementId, LayoutId, ParentElement, Pixels, Point, Position, Size, Style,
     Window, point, px,
 };
 use smallvec::SmallVec;
@@ -238,13 +238,6 @@ impl Element for Anchored {
     }
 }
 
-impl IntoElement for Anchored {
-    type Element = Self;
-
-    fn into_element(self) -> Self::Element {
-        self
-    }
-}
 
 /// Which algorithm to use when fitting the anchored element to be inside the window.
 #[allow(dead_code)]

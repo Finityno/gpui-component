@@ -2,7 +2,7 @@ use std::{ops::Range, rc::Rc};
 
 use gpui::{
     App, BorderStyle, Bounds, ContentMask, Corners, Edges, Element, ElementId, ElementInputHandler,
-    Entity, GlobalElementId, Half, HighlightStyle, Hitbox, Hsla, IntoElement, LayoutId,
+    Entity, GlobalElementId, Half, HighlightStyle, Hitbox, Hsla, LayoutId,
     MouseButton, MouseMoveEvent, Path, Pixels, Point, ShapedLine, SharedString, Size, Style,
     TextAlign, TextRun, TextStyle, UnderlineStyle, Window, fill, point, px, quad, relative, size,
 };
@@ -306,7 +306,7 @@ impl TextElement {
         range: Range<usize>,
         last_layout: &LastLayout,
         bounds: &Bounds<Pixels>,
-    ) -> Option<Path<Pixels>> {
+    ) -> Option<Path> {
         if range.is_empty() {
             return None;
         }
@@ -438,7 +438,7 @@ impl TextElement {
         last_layout: &LastLayout,
         bounds: &Bounds<Pixels>,
         cx: &mut App,
-    ) -> Vec<(Path<Pixels>, bool)> {
+    ) -> Vec<(Path, bool)> {
         let search_panel = self.state.read(cx).search_panel.clone();
         let Some((ranges, current_match_ix)) = search_panel.and_then(|panel| {
             if let Some(matcher) = panel.read(cx).matcher() {
@@ -465,7 +465,7 @@ impl TextElement {
         last_layout: &LastLayout,
         bounds: &Bounds<Pixels>,
         cx: &mut App,
-    ) -> Option<Path<Pixels>> {
+    ) -> Option<Path> {
         let hover_popover = self.state.read(cx).hover_popover.clone();
         let Some(symbol_range) = hover_popover.map(|popover| popover.read(cx).symbol_range.clone())
         else {
@@ -480,7 +480,7 @@ impl TextElement {
         document_colors: &[(Range<usize>, Hsla)],
         last_layout: &LastLayout,
         bounds: &Bounds<Pixels>,
-    ) -> Vec<(Path<Pixels>, Hsla)> {
+    ) -> Vec<(Path, Hsla)> {
         let mut paths = vec![];
         for (range, color) in document_colors.iter() {
             if let Some(path) = Self::layout_match_range(range.clone(), last_layout, bounds) {
@@ -497,7 +497,7 @@ impl TextElement {
         bounds: &mut Bounds<Pixels>,
         window: &mut Window,
         cx: &mut App,
-    ) -> Option<Path<Pixels>> {
+    ) -> Option<Path> {
         let state = self.state.read(cx);
         if !state.focus_handle.is_focused(window) {
             return None;
@@ -882,12 +882,12 @@ pub(super) struct PrepaintState {
     cursor_scroll_offset: Point<Pixels>,
     /// row index (zero based), no wrap, same line as the cursor.
     current_row: Option<usize>,
-    selection_path: Option<Path<Pixels>>,
-    hover_highlight_path: Option<Path<Pixels>>,
-    search_match_paths: Vec<(Path<Pixels>, bool)>,
-    document_color_paths: Vec<(Path<Pixels>, Hsla)>,
+    selection_path: Option<Path>,
+    hover_highlight_path: Option<Path>,
+    search_match_paths: Vec<(Path, bool)>,
+    document_color_paths: Vec<(Path, Hsla)>,
     hover_definition_hitbox: Option<Hitbox>,
-    indent_guides_path: Option<Path<Pixels>>,
+    indent_guides_path: Option<Path>,
     inline_badges_by_line: Vec<Vec<(Range<usize>, InlineBadge)>>,
     bounds: Bounds<Pixels>,
     // Inline completion rendering data
@@ -908,13 +908,6 @@ impl PrepaintState {
     }
 }
 
-impl IntoElement for TextElement {
-    type Element = Self;
-
-    fn into_element(self) -> Self::Element {
-        self
-    }
-}
 
 impl Element for TextElement {
     type RequestLayoutState = ();

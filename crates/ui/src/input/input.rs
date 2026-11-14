@@ -494,13 +494,6 @@ impl InputActions {
     }
 }
 
-impl IntoElement for InputActions {
-    type Element = Self;
-
-    fn into_element(self) -> Self::Element {
-        self
-    }
-}
 
 impl Element for InputActions {
     type RequestLayoutState = ();

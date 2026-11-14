@@ -8,14 +8,6 @@ pub fn derive_into_plot(input: TokenStream) -> TokenStream {
     let (impl_generics, type_generics, where_clause) = ast.generics.split_for_impl();
 
     let expanded = quote! {
-        impl #impl_generics gpui::IntoElement for #type_name #type_generics #where_clause {
-            type Element = Self;
-
-            fn into_element(self) -> Self::Element {
-                self
-            }
-        }
-
         impl #impl_generics gpui::Element for #type_name #type_generics #where_clause {
             type RequestLayoutState = ();
             type PrepaintState = ();
